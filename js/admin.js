@@ -119,24 +119,18 @@ window.saveSettings = async function(comp) {
   const pre = comp === 'normal' ? 'n' : 'p';
   const dlVal = document.getElementById(`${pre}-dl`).value;
   const updates = {
+    type:         comp,
     max_renners:  parseInt(document.getElementById(`${pre}-mr`).value) || 15,
     budget:       parseInt(document.getElementById(`${pre}-b`).value)  || 1000,
     max_per_team: parseInt(document.getElementById(`${pre}-mt`).value) || 3,
     deadline:     dlVal || null,
     updated_at:   new Date().toISOString(),
   };
-  const { error } = await sb.from('competition_settings').update(updates).eq('type', comp);
+  const { error } = await sb.from('competition_settings')
+    .upsert(updates, { onConflict: 'type' });
   if (error) { showAlert('sett-res', error.message); return; }
   state.settings[comp] = { ...state.settings[comp], ...updates };
   showAlert('sett-res', 'Opgeslagen!', 'as');
-};
-
-window.clearDeadline = async function(comp) {
-  const pre = comp === 'normal' ? 'n' : 'p';
-  document.getElementById(`${pre}-dl`).value = '';
-  await sb.from('competition_settings').update({ deadline: null }).eq('type', comp);
-  state.settings[comp] = { ...state.settings[comp], deadline: null };
-  renderSettingsTab(comp);
 };
 
 // ============================================================
