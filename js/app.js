@@ -192,24 +192,129 @@ window.renderKlassement = renderKlassement;
 // ============================================================
 sb.auth.onAuthStateChange(async (event, session) => {
   if (session?.user) {
-    // Profiel ophalen
-    const { data: profile } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
-    if (!profile) return;
+    loading(true);
+    try {
+      // Profiel ophalen
+      const { data: profile, error: profErr } = await sb
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
 
-    // competitie ophalen uit meest recente team
-    const { data: teams } = await sb.from('user_teams').select('competitie').eq('user_id', profile.id).limit(1);
-    profile.competitie = teams?.[0]?.competitie || null;
-    profile.ploeg_naam = '';
+      if (profErr || !profile) {
+        // Profiel bestaat niet — maak het aan
+        const naam = session.user.user_metadata?.naam
+          || session.user.email.split('@')[0];
+        const { data: newProfile, error: insErr } = await sb
+          .from('profiles')
+          .insert({ id: session.user.id, naam, email: session.user.email, is_admin: false })
+          .select()
+          .single();
+        if (insErr) {
+          console.error('Profiel aanmaken mislukt:', insErr);
+          loading(false);
+          showAlert('lerr', 'Fout bij laden profiel: ' + insErr.message);
+          return;
+        }
+        state.profile = newProfile;
+      } else {
+        state.profile = profile;
+      }
 
-    state.profile = profile;
+      // Competitie ophalen
+      const { data: teams } = await sb
+        .from('user_teams')
+        .select('competitie, ploeg_naam')
+        .eq('user_id', state.profile.id)
+        .limit(1);
+      state.profile.competitie = teams?.[0]?.competitie || null;
+      state.profile.ploeg_naam = teams?.[0]?.ploeg_naam || '';
 
-    // Data laden
-    await loadAllData();
+      // Instellingen laden (apart, zodat fout hier login niet blokkeert)
+      try {
+        const { data: settData } = await sb
+          .from('competition_settings')
+          .select('*');
+        state.settings = {};
+        (settData || []).forEach(s => state.settings[s.type] = s);
+
+        // Als geen instellingen bestaan, insert defaults
+        if (!state.settings['normal']) {
+          await sb.from('competition_settings').upsert([
+            { type: 'normal', max_renners: 15, budget: 1000, max_per_team: 3 },
+            { type: 'pro',    max_renners: 10, budget:  750, max_per_team: 2 },
+          ], { onConflict: 'type' });
+          state.settings['normal'] = { type:'normal', max_renners:15, budget:1000, max_per_team:3, deadline:null };
+          state.settings['pro']    = { type:'pro',    max_renners:10, budget: 750, max_per_team:2, deadline:null };
+        }
+      } catch(e) {
+        console.warn('Settings laden mislukt, gebruik defaults:', e);
+        state.settings = {
+          normal: { type:'normal', max_renners:15, budget:1000, max_per_team:3, deadline:null },
+          pro:    { type:'pro',    max_renners:10, budget: 750, max_per_team:2, deadline:null },
+        };
+      }
+
+      // Koersen laden
+      try {
+        const { data: koersData } = await sb.from('koersen').select('*').order('naam');
+        state.koersen = koersData || [];
+      } catch(e) { console.warn('Koersen laden mislukt:', e); state.koersen = []; }
+
+      // Renners laden
+      try {
+        const { data: rennerData } = await sb
+          .from('renners')
+          .select('*, renner_koersen(koers_id)')
+          .order('naam');
+        state.renners = (rennerData || []).map(r => ({
+          ...r,
+          koers_ids: (r.renner_koersen || []).map(rk => rk.koers_id),
+        }));
+      } catch(e) { console.warn('Renners laden mislukt:', e); state.renners = []; }
+
+      // Mijn ploegen laden
+      try {
+        const { data: teamData } = await sb
+          .from('user_teams')
+          .select('*, user_team_renners(renner_id)')
+          .eq('user_id', state.profile.id);
+        state.myTeams = {};
+        (teamData || []).forEach(t => {
+          state.myTeams[t.competitie] = {
+            id: t.id,
+            ploeg_naam: t.ploeg_naam,
+            renner_ids: (t.user_team_renners || []).map(utr => utr.renner_id),
+          };
+        });
+      } catch(e) { console.warn('Teams laden mislukt:', e); state.myTeams = {}; }
+
+      // Uitslag rijen laden
+      try {
+        const { data: rijen } = await sb
+          .from('uitslag_rijen')
+          .select('*, uitslagen(type, koers_id)');
+        state.allUitslag_rijen = (rijen || []).map(r => ({
+          ...r,
+          type: r.uitslagen?.type || 'rit',
+          koers_id: r.uitslagen?.koers_id,
+        }));
+      } catch(e) { console.warn('Uitslagen laden mislukt:', e); state.allUitslag_rijen = []; }
+
+    } catch(e) {
+      console.error('Login fout:', e);
+      loading(false);
+      showAlert('lerr', 'Onverwachte fout: ' + e.message);
+      return;
+    }
+
+    loading(false);
 
     // UI tonen
     document.getElementById('auth-screen').style.display = 'none';
     document.getElementById('main-screen').style.display = 'block';
-    document.getElementById('nav-admin').style.display = profile.is_admin ? 'inline-block' : 'none';
+    document.getElementById('nav-admin').style.display =
+      state.profile.is_admin ? 'inline-block' : 'none';
 
     goPage('competitie');
 
@@ -218,5 +323,6 @@ sb.auth.onAuthStateChange(async (event, session) => {
     state.profile = null;
     document.getElementById('main-screen').style.display = 'none';
     document.getElementById('auth-screen').style.display = 'block';
+    loading(false);
   }
 });
