@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Wielermanager</title>
+  <link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+
+<!-- AUTH SCREEN -->
+<div id="auth-screen" class="auth-wrap">
+  <div class="auth-card">
+    <div class="auth-logo">🚴 <span>Wiel</span>manager</div>
+    <div class="auth-sub">Stel je droomploeg samen</div>
+    <div class="tab-pills">
+      <div class="tpill active" onclick="switchAuth('login')" id="tab-login">Aanmelden</div>
+      <div class="tpill" onclick="switchAuth('register')" id="tab-register">Registreren</div>
+    </div>
+    <div id="login-form">
+      <input type="email" id="le" placeholder="E-mailadres"/>
+      <input type="password" id="lp" placeholder="Wachtwoord"/>
+      <div class="alert ad" id="lerr" style="display:none"></div>
+      <button class="btn btn-primary w100" onclick="doLogin()" id="login-btn">Aanmelden</button>
+    </div>
+    <div id="register-form" style="display:none">
+      <input type="text" id="rn" placeholder="Naam"/>
+      <input type="email" id="re" placeholder="E-mailadres"/>
+      <input type="password" id="rp" placeholder="Wachtwoord (min. 6 tekens)"/>
+      <div class="alert ad" id="rerr" style="display:none"></div>
+      <div class="alert as" id="rsuc" style="display:none"></div>
+      <button class="btn btn-primary w100" onclick="doRegister()" id="register-btn">Account aanmaken</button>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="main-screen" style="display:none">
+  <nav class="nav">
+    <div class="nav-logo">🚴 <span>Wiel</span>manager</div>
+    <button class="nav-tab active" id="nav-competitie" onclick="goPage('competitie')">Competitie</button>
+    <button class="nav-tab" id="nav-selectie" onclick="goPage('selectie')">Selectie</button>
+    <button class="nav-tab" id="nav-mijnploeg" onclick="goPage('mijnploeg')">Mijn ploeg</button>
+    <button class="nav-tab" id="nav-klassement" onclick="goPage('klassement')">Klassement</button>
+    <button class="nav-tab" id="nav-admin" onclick="goPage('admin')" style="display:none">Admin</button>
+    <button class="btn btn-sm" onclick="doLogout()" style="margin-left:auto">Afmelden</button>
+  </nav>
+
+  <div id="page-competitie" class="page active"></div>
+  <div id="page-selectie"   class="page"></div>
+  <div id="page-mijnploeg"  class="page"></div>
+  <div id="page-klassement" class="page"></div>
+  <div id="page-admin"      class="page"></div>
+</div>
+
+<!-- LOADING OVERLAY -->
+<div id="loading-overlay" class="loading-overlay" style="display:none">
+  <div class="loading-spinner"></div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
