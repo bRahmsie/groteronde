@@ -192,9 +192,20 @@ async function renderKoersenTab() {
     </div>`;
   }).join('');
 
+  // Totaal deelnemers over alle koersen
+  const totaalDeelnemers = state.koersen.reduce((s, k) =>
+    s + state.renners.filter(r => r.koers_ids?.includes(k.id)).length, 0);
+
   document.getElementById('admin-content').innerHTML = `
     <div class="card">
-      <div class="card-title">Koersen &amp; deelnemers</div>
+      <div class="sh">
+        <div class="card-title" style="margin-bottom:0">Koersen &amp; deelnemers</div>
+        ${state.koersen.length > 0 ? `
+          <button class="btn btn-sm btn-danger"
+            onclick="clearAlleDeelnemers()">
+            Wis alle deelnemers (alle koersen)
+          </button>` : ''}
+      </div>
       <div class="alert ai" style="margin-bottom:.8rem;font-size:12px">
         Maak een koers aan, importeer daarna de deelnemerslijst. Gebruikers zien dan de filter
         <strong>"Doet mee aan [koers]"</strong> in de rennersselectie.
@@ -287,6 +298,15 @@ window.clearDeelnemers = async function(koersId, koersNaam) {
   renderKoersenTab();
 };
 
+window.clearAlleDeelnemers = async function() {
+  if (!confirm('Alle deelnemers van ALLE koersen verwijderen?\nDe koersen zelf blijven bestaan.')) return;
+  loading(true);
+  await sb.from('renner_koersen').delete().neq('renner_id', '00000000-0000-0000-0000-000000000000');
+  state.renners.forEach(r => { r.koers_ids = []; });
+  loading(false);
+  renderKoersenTab();
+};
+
 window.addKoers = async function() {
   const naam = document.getElementById('new-koers').value.trim();
   if (!naam) return;
@@ -342,7 +362,13 @@ async function renderRennersTab() {
     <div class="card">
       <div class="sh">
         <div class="card-title" style="margin-bottom:0">Renners &amp; kostprijs</div>
-        <span class="badge">${state.renners.length} renners</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="badge">${state.renners.length} renners</span>
+          ${state.renners.length > 0 ? `
+            <button class="btn btn-sm btn-danger" onclick="deleteAlleRenners()">
+              Wis alle renners
+            </button>` : ''}
+        </div>
       </div>
       <div class="alert ai" style="margin-bottom:.8rem;font-size:12px">
         Pas hier de kostprijs per renner aan.
@@ -357,6 +383,21 @@ window.updateKostprijs = async function(id, val) {
   await sb.from('renners').update({ kostprijs: v }).eq('id', id);
   const r = state.renners.find(x => x.id === id);
   if (r) r.kostprijs = v;
+};
+
+window.deleteAlleRenners = async function() {
+  const n = state.renners.length;
+  if (!confirm(`Alle ${n} renners verwijderen uit de database?\nDit verwijdert ook alle koers-koppelingen en gebruikersselecties.`)) return;
+  loading(true);
+  // Koers-koppelingen eerst verwijderen (foreign key)
+  await sb.from('renner_koersen').delete().neq('renner_id', '00000000-0000-0000-0000-000000000000');
+  // Gebruikersselecties verwijderen
+  await sb.from('user_team_renners').delete().neq('renner_id', '00000000-0000-0000-0000-000000000000');
+  // Renners verwijderen
+  await sb.from('renners').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  state.renners = [];
+  loading(false);
+  renderRennersTab();
 };
 
 // ============================================================
