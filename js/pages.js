@@ -13,8 +13,11 @@ export let state = {
   allUitslag_rijen: [],
 };
 
-// Actieve koersfilter — globaal zodat inline handlers het kunnen bereiken
-window._activeKF = null;
+// Filterstate — globaal en persistent zodat renner selecteren ze niet reset
+window._activeKF  = null;   // actieve koersfilter (koers id of null)
+window._filterFT  = '';     // geselecteerde ploeg
+window._filterFS  = 'naam'; // sorteerorder
+window._filterQ   = '';     // zoekterm
 
 // ============================================================
 // DATA LADEN
@@ -55,7 +58,7 @@ export async function loadAllData() {
       .select('*, uitslagen(type, koers_id)');
     state.allUitslag_rijen = (rijen || []).map(r => ({
       ...r,
-      type:     r.uitslagen?.type    || 'rit',
+      type:     r.uitslagen?.type     || 'rit',
       koers_id: r.uitslagen?.koers_id,
     }));
 
@@ -153,7 +156,8 @@ export function renderCompPage() {
 }
 
 // ============================================================
-// SELECTIE PAGINA  — render het frame + filters
+// SELECTIE PAGINA — bouw het frame éénmalig
+// Filters/zoekterm worden hersteld vanuit globale state
 // ============================================================
 export function renderSelectiePage() {
   const comp   = cC();
@@ -165,22 +169,17 @@ export function renderSelectiePage() {
   const s      = cSett(comp);
   const locked = isLocked(comp);
   const sel    = myTeam(comp).renner_ids;
-  const used   = budgetUsed(comp);
-  const left   = s.budget - used;
+  const left   = s.budget - budgetUsed(comp);
 
-  // Koers-pills — als een koersfilter actief is, beperken we ook de ploegen-dropdown
+  // Koers-pills
   const pills = state.koersen.map(k =>
     `<span class="pill-filter${window._activeKF === k.id ? ' active' : ''}"
       onclick="setKF('${k.id}')"
     >Doet mee aan ${k.naam}</span>`
   ).join('');
 
-  // Ploegen dropdown — gefilterd op actieve koers indien van toepassing
-  const beschikbareRenners = window._activeKF
-    ? state.renners.filter(r => r.koers_ids?.includes(window._activeKF))
-    : state.renners;
-  const ploegen = [...new Set(beschikbareRenners.map(r => r.ploeg))].sort();
-  const ploegOpts = ploegen.map(p => `<option value="${p}">${p}</option>`).join('');
+  // Ploegen dropdown — gefilterd op actieve koers
+  const ploegOpts = _ploegOptions(window._filterFT);
 
   document.getElementById('page-selectie').innerHTML = `
     ${locked
@@ -189,7 +188,8 @@ export function renderSelectiePage() {
     ${isComplete(comp)
       ? `<div class="complete-banner">
            <span>✔ Ploeg compleet!</span>
-           <button class="btn btn-sm" style="background:rgba(255,255,255,.2);color:#fff;border-color:rgba(255,255,255,.4)"
+           <button class="btn btn-sm"
+             style="background:rgba(255,255,255,.2);color:#fff;border-color:rgba(255,255,255,.4)"
              onclick="goPage('mijnploeg')">Bekijk</button>
          </div>`
       : ''}
@@ -230,16 +230,17 @@ export function renderSelectiePage() {
 
       <!-- Zoek + filters -->
       <input type="text" id="search" placeholder="Zoek renner of ploeg..."
-        oninput="renderRennerList()" style="margin-bottom:8px"/>
+        value="${window._filterQ}"
+        oninput="onSearchInput(this.value)"
+        style="margin-bottom:8px"/>
       <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
-        <select id="ft" style="width:auto;margin-bottom:0" onchange="renderRennerList()">
-          <option value="">Alle ploegen</option>
-          ${ploegOpts}
+        <select id="ft" style="width:auto;margin-bottom:0" onchange="onFilterTeam(this.value)">
+          <option value="">Alle ploegen</option>${ploegOpts}
         </select>
-        <select id="fs" style="width:auto;margin-bottom:0" onchange="renderRennerList()">
-          <option value="naam">Naam A-Z</option>
-          <option value="pd">Kostprijs ↓</option>
-          <option value="pa">Kostprijs ↑</option>
+        <select id="fs" style="width:auto;margin-bottom:0" onchange="onFilterSort(this.value)">
+          <option value="naam"  ${window._filterFS === 'naam' ? 'selected' : ''}>Naam A-Z</option>
+          <option value="pd"    ${window._filterFS === 'pd'   ? 'selected' : ''}>Kostprijs ↓</option>
+          <option value="pa"    ${window._filterFS === 'pa'   ? 'selected' : ''}>Kostprijs ↑</option>
         </select>
       </div>
 
@@ -247,69 +248,92 @@ export function renderSelectiePage() {
       <div id="rl"></div>
     </div>`;
 
-  // Render de lijst meteen
   renderRennerList();
 }
 
+// Hulpfunctie: bouw <option> tags voor ploegen, gefilterd op actieve koers
+function _ploegOptions(geselecteerde) {
+  const basis = window._activeKF
+    ? state.renners.filter(r => r.koers_ids?.includes(window._activeKF))
+    : state.renners;
+  const ploegen = [...new Set(basis.map(r => r.ploeg))].sort();
+  return ploegen.map(p =>
+    `<option value="${p}"${p === geselecteerde ? ' selected' : ''}>${p}</option>`
+  ).join('');
+}
+
 // ============================================================
-// RENNERLIJST RENDEREN  — global zodat oninput/onchange werkt
+// FILTER EVENT HANDLERS — sla op in globale state, render lijst
+// ============================================================
+window.onSearchInput  = function(v) { window._filterQ  = v;  renderRennerList(); };
+window.onFilterTeam   = function(v) { window._filterFT = v;  renderRennerList(); };
+window.onFilterSort   = function(v) { window._filterFS = v;  renderRennerList(); };
+
+// Koersfilter: update pills + herlaad ploegen dropdown + render lijst
+// Geen volledige pagina-rebuild — enkel de pills en dropdown bijwerken
+window.setKF = function(koersId) {
+  window._activeKF  = koersId;
+  window._filterFT  = '';  // ploegfilter resetten want die ploeg bestaat misschien niet in nieuwe koers
+
+  // Pills updaten
+  document.querySelectorAll('.pill-filter').forEach(el => {
+    const onclick = el.getAttribute('onclick') || '';
+    const isAll   = onclick.includes('null');
+    const isThis  = onclick.includes(`'${koersId}'`);
+    el.classList.toggle('active', koersId === null ? isAll : isThis);
+  });
+
+  // Ploegen dropdown herbouwen
+  const ftEl = document.getElementById('ft');
+  if (ftEl) {
+    ftEl.innerHTML = '<option value="">Alle ploegen</option>' + _ploegOptions('');
+  }
+
+  renderRennerList();
+};
+
+// ============================================================
+// RENNERLIJST — enkel de kaarten, zonder de rest van de pagina te raken
 // ============================================================
 export function renderRennerList() {
   const comp   = cC() || 'normal';
   const s      = cSett(comp);
   const locked = isLocked(comp);
   const sel    = myTeam(comp).renner_ids;
-  const used   = budgetUsed(comp);
-  const left   = s.budget - used;
+  const left   = s.budget - budgetUsed(comp);
 
-  const srch = (document.getElementById('search')?.value || '').toLowerCase().trim();
-  const ft   = document.getElementById('ft')?.value   || '';
-  const fs   = document.getElementById('fs')?.value   || 'naam';
+  const srch = (window._filterQ  || '').toLowerCase().trim();
+  const ft   =  window._filterFT || '';
+  const fs   =  window._filterFS || 'naam';
 
-  // 1. Start met alle renners
+  // Filter pipeline
   let list = state.renners.slice();
 
-  // 2. Filter op actieve koers — bepaalt ook welke ploegen beschikbaar zijn
-  if (window._activeKF) {
+  if (window._activeKF)
     list = list.filter(r => r.koers_ids?.includes(window._activeKF));
-  }
 
-  // 3. Filter op geselecteerde ploeg (dropdown)
-  if (ft) {
+  if (ft)
     list = list.filter(r => r.ploeg === ft);
-  }
 
-  // 4. Filter op zoekterm
-  if (srch) {
+  if (srch)
     list = list.filter(r =>
       r.naam.toLowerCase().includes(srch) ||
       r.ploeg.toLowerCase().includes(srch)
     );
-  }
 
-  // 5. Sorteren
+  // Sorteren
   if      (fs === 'pd') list.sort((a, b) => b.kostprijs - a.kostprijs);
   else if (fs === 'pa') list.sort((a, b) => a.kostprijs - b.kostprijs);
   else                  list.sort((a, b) => a.naam.localeCompare(b.naam));
 
-  // Badge bijwerken
+  // Badge
   const badge = document.getElementById('badge-cnt');
   if (badge) badge.textContent = list.length + ' renners';
 
-  // Ploegen dropdown bijwerken op basis van koersfilter
-  // (zodat je niet kunt filteren op een ploeg die niet meedoet aan de geselecteerde koers)
-  const ftEl = document.getElementById('ft');
-  if (ftEl) {
-    const huidigeFt = ftEl.value;
-    const beschikbaar = window._activeKF
-      ? state.renners.filter(r => r.koers_ids?.includes(window._activeKF))
-      : state.renners;
-    const ploegen = [...new Set(beschikbaar.map(r => r.ploeg))].sort();
-    ftEl.innerHTML = '<option value="">Alle ploegen</option>'
-      + ploegen.map(p => `<option value="${p}"${p === huidigeFt ? ' selected' : ''}>${p}</option>`).join('');
-  }
+  // Metrics bijwerken
+  _updateMetrics(comp, s, sel, left);
 
-  // Kaarten renderen
+  // Kaarten
   const html = list.map(r => {
     const isSel = sel.includes(r.id);
     const tc    = teamCount(r.ploeg, comp);
@@ -328,8 +352,7 @@ export function renderRennerList() {
       return k ? `<span class="koers-tag">${k.naam}</span>` : '';
     }).join('');
 
-    const rPts = calcRennerPtsFromRijen(state.allUitslag_rijen, r.naam);
-
+    const rPts       = calcRennerPtsFromRijen(state.allUitslag_rijen, r.naam);
     const clickHandler = (dis && !isSel) || locked
       ? `showAlertBox('${locked ? 'Selectie gesloten' : reason}')`
       : `toggleRenner('${r.id}')`;
@@ -356,14 +379,33 @@ export function renderRennerList() {
   const rl = document.getElementById('rl');
   if (rl) rl.innerHTML = html;
 }
-// Beschikbaar stellen als globale functie
 window.renderRennerList = renderRennerList;
 
-// Koersfilter instellen — herrendert de volledige pagina zodat ook ploegen-dropdown bijwerkt
-window.setKF = function(koersId) {
-  window._activeKF = koersId;
-  renderSelectiePage();
-};
+// Metrics in de selectiepagina bijwerken zonder volledige herrender
+function _updateMetrics(comp, s, sel, left) {
+  const mg = document.querySelector('#page-selectie .metric-value.ok, #page-selectie .metric-value.over');
+  // Renners teller
+  const allMetrics = document.querySelectorAll('#page-selectie .metric');
+  if (allMetrics[1]) {
+    const mv = allMetrics[1].querySelector('.metric-value');
+    if (mv) {
+      mv.textContent = sel.length + ' / ' + s.max_renners;
+      mv.className   = 'metric-value ' + (sel.length >= s.max_renners ? 'over' : 'ok');
+    }
+  }
+  // Budget over
+  if (allMetrics[2]) {
+    const mv = allMetrics[2].querySelector('.metric-value');
+    if (mv) {
+      mv.textContent = left;
+      mv.className   = 'metric-value ' + (left < 0 ? 'over' : 'ok');
+    }
+  }
+  // Complete banner
+  const cb = document.getElementById('complete-banner');
+  // complete banner zit niet altijd in DOM als ploeg nog niet compleet was bij render
+  // renderSelectiePage handelt dit af bij volgende navigatie
+}
 
 // ============================================================
 // MIJN PLOEG
@@ -454,8 +496,8 @@ export function renderMijnPloeg() {
 // KLASSEMENT
 // ============================================================
 export async function renderKlassement() {
-  const comp        = document.getElementById('kl-comp')?.value   || 'normal';
-  const koersFilter = document.getElementById('kl-koers')?.value  || '';
+  const comp        = document.getElementById('kl-comp')?.value  || 'normal';
+  const koersFilter = document.getElementById('kl-koers')?.value || '';
 
   const { data: teams } = await sb
     .from('user_teams')
@@ -473,7 +515,12 @@ export async function renderKlassement() {
       : state.allUitslag_rijen;
     const pts      = calcUserPtsFromRijen(rijFilter, rennerNamen);
     const compleet = rennerNamen.length === s.max_renners;
-    return { naam: t.profiles?.naam || '—', ploeg_naam: t.ploeg_naam, rennerNamen, pts, compleet, n: rennerNamen.length };
+    return {
+      naam: t.profiles?.naam || '—',
+      ploeg_naam: t.ploeg_naam,
+      pts, compleet,
+      n: rennerNamen.length,
+    };
   }).sort((a, b) => b.pts - a.pts || a.naam.localeCompare(b.naam));
 
   const koersOpts = state.koersen.map(k =>
@@ -487,7 +534,7 @@ export async function renderKlassement() {
         <div style="display:flex;gap:6px">
           <select id="kl-comp" style="width:120px;margin-bottom:0" onchange="renderKlassement()">
             <option value="normal"${comp === 'normal' ? ' selected' : ''}>Normaal</option>
-            <option value="pro"${comp === 'pro' ? ' selected' : ''}>Pro</option>
+            <option value="pro"${comp === 'pro'    ? ' selected' : ''}>Pro</option>
           </select>
           <select id="kl-koers" style="width:150px;margin-bottom:0" onchange="renderKlassement()">
             <option value="">Alle koersen</option>${koersOpts}
@@ -497,16 +544,16 @@ export async function renderKlassement() {
       ${rows.length === 0
         ? '<div style="font-size:13px;color:var(--text2);padding:.5rem">Geen deelnemers.</div>'
         : `<table><thead><tr>
-            <th>#</th><th>Deelnemer</th><th>Ploegnaam</th><th>Renners</th><th>Status</th><th>Punten</th>
+             <th>#</th><th>Deelnemer</th><th>Ploegnaam</th><th>Renners</th><th>Status</th><th>Punten</th>
            </tr></thead>
            <tbody>${rows.map((r, i) => `<tr>
-            <td class="${i === 0 ? 'rg' : i === 1 ? 'rs' : i === 2 ? 'rb' : ''}">${i + 1}</td>
-            <td style="font-weight:500">${r.naam}</td>
-            <td style="color:var(--text2)">${r.ploeg_naam || '—'}</td>
-            <td>${r.n}/${s.max_renners}</td>
-            <td><span class="badge ${r.compleet ? 'bg' : 'br'}">${r.compleet ? '✓ Compleet' : 'Incompleet'}</span></td>
-            <td><span class="pts-pill ${r.pts > 0 ? 'pts-pos' : 'pts-zero'}"
-              style="font-size:13px;padding:2px 9px">${r.pts}</span></td>
+             <td class="${i === 0 ? 'rg' : i === 1 ? 'rs' : i === 2 ? 'rb' : ''}">${i + 1}</td>
+             <td style="font-weight:500">${r.naam}</td>
+             <td style="color:var(--text2)">${r.ploeg_naam || '—'}</td>
+             <td>${r.n}/${s.max_renners}</td>
+             <td><span class="badge ${r.compleet ? 'bg' : 'br'}">${r.compleet ? '✓ Compleet' : 'Incompleet'}</span></td>
+             <td><span class="pts-pill ${r.pts > 0 ? 'pts-pos' : 'pts-zero'}"
+               style="font-size:13px;padding:2px 9px">${r.pts}</span></td>
            </tr>`).join('')}</tbody></table>`}
     </div>`;
 }
