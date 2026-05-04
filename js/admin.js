@@ -260,10 +260,12 @@ async function _verwerkDeelnemers(koersId, koersNaam, raw) {
 
   // Vervang alle bestaande koppelingen voor deze koers
   await sb.from('renner_koersen').delete().eq('koers_id', koersId);
+  // Batch insert van max 500 per keer om Supabase payload-limiet te vermijden
   if (rennerIds.length) {
-    await sb.from('renner_koersen').insert(
-      rennerIds.map(rid => ({ renner_id: rid, koers_id: koersId }))
-    );
+    const rows = rennerIds.map(rid => ({ renner_id: rid, koers_id: koersId }));
+    for (let i = 0; i < rows.length; i += 500) {
+      await sb.from('renner_koersen').insert(rows.slice(i, i + 500));
+    }
   }
 
   // Update lokale state
@@ -659,6 +661,8 @@ window.importCsvRenners = async function() {
   const lines = raw.split('\n').map(l => l.trim()).filter(l => l);
   let added = 0, updated = 0, errors = [];
 
+  // Splits in nieuwen en te updaten
+  const toInsert = [];
   for (const line of lines) {
     const p = line.split(';');
     if (p.length < 3) { errors.push(`Ongeldig formaat: ${line}`); continue; }
@@ -666,18 +670,26 @@ window.importCsvRenners = async function() {
     const ploeg     = p[1].trim();
     const kostprijs = parseInt(p[2].trim());
     if (!naam || !ploeg || isNaN(kostprijs)) { errors.push(`Ongeldige waarden: ${line}`); continue; }
-
-    const existing = state.renners.find(r =>
-      r.naam.toLowerCase().trim() === naam.toLowerCase().trim()
-    );
+    const existing = state.renners.find(r => r.naam.toLowerCase().trim() === naam.toLowerCase().trim());
     if (existing) {
+      // Update één voor één (updates gaan snel, zijn geen grote batches)
       const { error } = await sb.from('renners').update({ ploeg, kostprijs }).eq('id', existing.id);
       if (!error) { existing.ploeg = ploeg; existing.kostprijs = kostprijs; updated++; }
       else errors.push(`Update mislukt voor ${naam}: ${error.message}`);
     } else {
-      const { data: nr, error } = await sb.from('renners').insert({ naam, ploeg, kostprijs }).select().single();
-      if (!error && nr) { state.renners.push({ ...nr, koers_ids: [] }); added++; }
-      else errors.push(`Insert mislukt voor ${naam}: ${error?.message}`);
+      toInsert.push({ naam, ploeg, kostprijs });
+    }
+  }
+
+  // Nieuwe renners in batches van 500 invoegen
+  const BATCH = 500;
+  for (let i = 0; i < toInsert.length; i += BATCH) {
+    const batch = toInsert.slice(i, i + BATCH);
+    const { data: inserted, error } = await sb.from('renners').insert(batch).select();
+    if (!error && inserted) {
+      inserted.forEach(nr => { state.renners.push({ ...nr, koers_ids: [] }); added++; });
+    } else if (error) {
+      errors.push(`Batch insert mislukt (rij ${i}–${i + batch.length}): ${error.message}`);
     }
   }
 
