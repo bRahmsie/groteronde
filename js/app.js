@@ -137,23 +137,30 @@ Object.defineProperty(window, '__activeKF', {
 
 window.toggleRenner = async function(rennerId) {
   const comp = state.profile.competitie || 'normal';
-  const s = state.settings[comp] || {};
+  const s    = state.settings[comp] || {};
   const team = state.myTeams[comp];
   if (!team) return;
 
-  const sel = team.renner_ids;
+  const sel  = team.renner_ids;
   const isIn = sel.includes(rennerId);
 
   if (isIn) {
-    await sb.from('user_team_renners').delete()
-      .eq('team_id', team.id).eq('renner_id', rennerId);
+    await sb.from('user_team_renners')
+      .delete()
+      .eq('team_id', team.id)
+      .eq('renner_id', rennerId);
     team.renner_ids = sel.filter(id => id !== rennerId);
   } else {
-    await sb.from('user_team_renners').insert({ team_id: team.id, renner_id: rennerId });
-    team.renner_ids = [...sel, rennerId];
+    // upsert ipv insert — voorkomt 409 als rij al bestaat
+    const { error } = await sb.from('user_team_renners')
+      .upsert(
+        { team_id: team.id, renner_id: rennerId },
+        { onConflict: 'team_id,renner_id', ignoreDuplicates: true }
+      );
+    if (!error) team.renner_ids = [...sel, rennerId];
   }
+
   renderRennerList();
-  // Update metrics in-place
   renderSelectiePage();
 };
 
