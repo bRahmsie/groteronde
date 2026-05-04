@@ -20,15 +20,33 @@ window._filterFS  = 'naam'; // sorteerorder
 window._filterQ   = '';     // zoekterm
 
 // ============================================================
+// PAGINERING HELPER
+// Supabase geeft standaard max 1000 rijen terug.
+// fetchAll haalt alle rijen op in stappen van 1000.
+// ============================================================
+export async function fetchAll(query, pageSize = 1000) {
+  let all = [], from = 0;
+  while (true) {
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all = all.concat(data);
+    if (data.length < pageSize) break; // laatste pagina
+    from += pageSize;
+  }
+  return all;
+}
+
+// ============================================================
 // DATA LADEN
 // ============================================================
 export async function loadAllData() {
   loading(true);
   try {
-    const [settRes, koersRes, rennerRes, teamRes] = await Promise.all([
+    // Instellingen, koersen en teams hebben nooit >1000 rijen
+    const [settRes, koersRes, teamRes] = await Promise.all([
       sb.from('competition_settings').select('*'),
       sb.from('koersen').select('*').order('naam'),
-      sb.from('renners').select('*, renner_koersen(koers_id)').order('naam'),
       sb.from('user_teams')
         .select('*, user_team_renners(renner_id)')
         .eq('user_id', state.profile.id),
@@ -39,11 +57,6 @@ export async function loadAllData() {
 
     state.koersen = koersRes.data || [];
 
-    state.renners = (rennerRes.data || []).map(r => ({
-      ...r,
-      koers_ids: (r.renner_koersen || []).map(rk => rk.koers_id),
-    }));
-
     state.myTeams = {};
     (teamRes.data || []).forEach(t => {
       state.myTeams[t.competitie] = {
@@ -53,10 +66,20 @@ export async function loadAllData() {
       };
     });
 
-    const { data: rijen } = await sb
-      .from('uitslag_rijen')
-      .select('*, uitslagen(type, koers_id)');
-    state.allUitslag_rijen = (rijen || []).map(r => ({
+    // Renners — kan >1000 zijn, gebruik fetchAll
+    const rennerData = await fetchAll(
+      sb.from('renners').select('*, renner_koersen(koers_id)').order('naam')
+    );
+    state.renners = rennerData.map(r => ({
+      ...r,
+      koers_ids: (r.renner_koersen || []).map(rk => rk.koers_id),
+    }));
+
+    // Uitslag rijen — kan ook groot zijn
+    const rijData = await fetchAll(
+      sb.from('uitslag_rijen').select('*, uitslagen(type, koers_id)')
+    );
+    state.allUitslag_rijen = rijData.map(r => ({
       ...r,
       type:     r.uitslagen?.type     || 'rit',
       koers_id: r.uitslagen?.koers_id,
