@@ -1,10 +1,3 @@
-// ============================================================
-// XLSX library (globaal beschikbaar via CDN)
-// ============================================================
-const xlsxScript = document.createElement('script');
-xlsxScript.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
-document.head.appendChild(xlsxScript);
-
 import { sb } from './supabase.js';
 import { loading, showAlert } from './helpers.js';
 import {
@@ -12,6 +5,11 @@ import {
   renderCompPage, renderSelectiePage, renderRennerList,
   renderMijnPloeg, renderKlassement,
 } from './pages.js';
+
+// XLSX library (globaal beschikbaar via CDN)
+const xlsxScript = document.createElement('script');
+xlsxScript.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+document.head.appendChild(xlsxScript);
 
 // ============================================================
 // AUTH
