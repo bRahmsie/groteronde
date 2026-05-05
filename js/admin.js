@@ -333,6 +333,8 @@ window.deleteKoers = async function(id) {
   getState().renners.forEach(r => {
     if (r.koers_ids) r.koers_ids = r.koers_ids.filter(k => k !== id);
   });
+  // Verwijder ook alle uitslagrijen van deze koers uit de cache
+  getState().allUitslag_rijen = getState().allUitslag_rijen.filter(r => r.koers_id !== id);
   renderKoersenTab();
 };
 
@@ -611,6 +613,8 @@ window.processSheets = async function() {
 
 window.deleteUitslag = async function(id) {
   await sb.from('uitslagen').delete().eq('id', id);
+  // Verwijder ook uit in-memory cache zodat punten meteen verdwijnen
+  getState().allUitslag_rijen = getState().allUitslag_rijen.filter(r => r.uitslag_id !== id);
   renderUitslagenTab();
 };
 
