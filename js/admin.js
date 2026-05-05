@@ -1,6 +1,7 @@
 import { sb } from './supabase.js';
 import { jersey, parseSheet, fmtDL, cDown, loading, showAlert } from './helpers.js';
-import { state } from './pages.js';
+// state is beschikbaar via window._appState (gezet door pages.js)
+const getState = () => window._appState;
 
 // ============================================================
 // ADMIN PAGINA HOOFDRENDER
@@ -50,8 +51,8 @@ async function renderGebruikers() {
     .order('naam');
   loading(false);
 
-  const s_norm = state.settings['normal'] || {};
-  const s_pro  = state.settings['pro']   || {};
+  const s_norm = getState().settings['normal'] || {};
+  const s_pro  = getState().settings['pro']   || {};
   const total  = users?.length || 0;
 
   const rows = (users || []).map(u => {
@@ -97,7 +98,7 @@ async function renderGebruikers() {
 // INSTELLINGEN TAB
 // ============================================================
 function renderSettingsTab(comp) {
-  const s   = state.settings[comp] || {};
+  const s   = getState().settings[comp] || {};
   const pre = comp === 'normal' ? 'n' : 'p';
   const lbl = comp === 'normal' ? 'Normaal' : 'Pro';
   document.getElementById('admin-content').innerHTML = `
@@ -137,7 +138,7 @@ window.saveSettings = async function(comp) {
   const { error } = await sb.from('competition_settings')
     .upsert(updates, { onConflict: 'type' });
   if (error) { showAlert('sett-res', error.message); return; }
-  state.settings[comp] = { ...state.settings[comp], ...updates };
+  getState().settings[comp] = { ...getState().settings[comp], ...updates };
   showAlert('sett-res', 'Opgeslagen!', 'as');
 };
 
@@ -145,7 +146,7 @@ window.clearDeadline = async function(comp) {
   const pre = comp === 'normal' ? 'n' : 'p';
   document.getElementById(`${pre}-dl`).value = '';
   await sb.from('competition_settings').update({ deadline: null }).eq('type', comp);
-  state.settings[comp] = { ...state.settings[comp], deadline: null };
+  getState().settings[comp] = { ...getState().settings[comp], deadline: null };
   renderSettingsTab(comp);
 };
 
@@ -153,8 +154,8 @@ window.clearDeadline = async function(comp) {
 // KOERSEN TAB — met deelnemers import per koers
 // ============================================================
 async function renderKoersenTab() {
-  const list = state.koersen.map(k => {
-    const aantalDeelnemers = state.renners.filter(r => r.koers_ids?.includes(k.id)).length;
+  const list = getState().koersen.map(k => {
+    const aantalDeelnemers = getState().renners.filter(r => r.koers_ids?.includes(k.id)).length;
     return `
     <div style="margin-bottom:1rem">
       <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:0.5px solid var(--border)">
@@ -193,14 +194,14 @@ async function renderKoersenTab() {
   }).join('');
 
   // Totaal deelnemers over alle koersen
-  const totaalDeelnemers = state.koersen.reduce((s, k) =>
-    s + state.renners.filter(r => r.koers_ids?.includes(k.id)).length, 0);
+  const totaalDeelnemers = getState().koersen.reduce((s, k) =>
+    s + getState().renners.filter(r => r.koers_ids?.includes(k.id)).length, 0);
 
   document.getElementById('admin-content').innerHTML = `
     <div class="card">
       <div class="sh">
         <div class="card-title" style="margin-bottom:0">Koersen &amp; deelnemers</div>
-        ${state.koersen.length > 0 ? `
+        ${getState().koersen.length > 0 ? `
           <button class="btn btn-sm btn-danger"
             onclick="clearAlleDeelnemers()">
             Wis alle deelnemers (alle koersen)
@@ -253,7 +254,7 @@ async function _verwerkDeelnemers(koersId, koersNaam, raw) {
   const rennerIds = [];
 
   namen.forEach(naam => {
-    const r = state.renners.find(x => norm(x.naam) === norm(naam));
+    const r = getState().renners.find(x => norm(x.naam) === norm(naam));
     if (r) { rennerIds.push(r.id); matched++; }
     else notFound.push(naam);
   });
@@ -269,7 +270,7 @@ async function _verwerkDeelnemers(koersId, koersNaam, raw) {
   }
 
   // Update lokale state
-  state.renners.forEach(r => {
+  getState().renners.forEach(r => {
     r.koers_ids = (r.koers_ids || []).filter(k => k !== koersId);
     if (rennerIds.includes(r.id)) r.koers_ids.push(koersId);
   });
@@ -293,7 +294,7 @@ window.clearDeelnemers = async function(koersId, koersNaam) {
   if (!confirm(`Alle deelnemers van ${koersNaam} verwijderen?`)) return;
   loading(true);
   await sb.from('renner_koersen').delete().eq('koers_id', koersId);
-  state.renners.forEach(r => {
+  getState().renners.forEach(r => {
     if (r.koers_ids) r.koers_ids = r.koers_ids.filter(k => k !== koersId);
   });
   loading(false);
@@ -304,7 +305,7 @@ window.clearAlleDeelnemers = async function() {
   if (!confirm('Alle deelnemers van ALLE koersen verwijderen?\nDe koersen zelf blijven bestaan.')) return;
   loading(true);
   await sb.from('renner_koersen').delete().neq('renner_id', '00000000-0000-0000-0000-000000000000');
-  state.renners.forEach(r => { r.koers_ids = []; });
+  getState().renners.forEach(r => { r.koers_ids = []; });
   loading(false);
   renderKoersenTab();
 };
@@ -314,22 +315,22 @@ window.addKoers = async function() {
   if (!naam) return;
   const { data, error } = await sb.from('koersen').insert({ naam }).select().single();
   if (error) { alert(error.message); return; }
-  state.koersen.push(data);
+  getState().koersen.push(data);
   document.getElementById('new-koers').value = '';
   renderKoersenTab();
 };
 
 window.renameKoers = async function(id, naam) {
   await sb.from('koersen').update({ naam: naam.trim() }).eq('id', id);
-  const k = state.koersen.find(x => x.id === id);
+  const k = getState().koersen.find(x => x.id === id);
   if (k) k.naam = naam.trim();
 };
 
 window.deleteKoers = async function(id) {
   if (!confirm('Koers verwijderen? Dit verwijdert ook alle bijhorende deelnemers en uitslagen.')) return;
   await sb.from('koersen').delete().eq('id', id);
-  state.koersen = state.koersen.filter(k => k.id !== id);
-  state.renners.forEach(r => {
+  getState().koersen = getState().koersen.filter(k => k.id !== id);
+  getState().renners.forEach(r => {
     if (r.koers_ids) r.koers_ids = r.koers_ids.filter(k => k !== id);
   });
   renderKoersenTab();
@@ -339,9 +340,9 @@ window.deleteKoers = async function(id) {
 // RENNERS TAB — kostprijs aanpassen, koersen read-only
 // ============================================================
 async function renderRennersTab() {
-  const html = state.renners.map(r => {
+  const html = getState().renners.map(r => {
     const koersLabels = (r.koers_ids || []).map(kid => {
-      const k = state.koersen.find(x => x.id === kid);
+      const k = getState().koersen.find(x => x.id === kid);
       return k ? `<span class="koers-tag">${k.naam}</span>` : '';
     }).join('');
     return `<div style="padding:7px 0;border-bottom:0.5px solid var(--border)">
@@ -365,8 +366,8 @@ async function renderRennersTab() {
       <div class="sh">
         <div class="card-title" style="margin-bottom:0">Renners &amp; kostprijs</div>
         <div style="display:flex;align-items:center;gap:8px">
-          <span class="badge">${state.renners.length} renners</span>
-          ${state.renners.length > 0 ? `
+          <span class="badge">${getState().renners.length} renners</span>
+          ${getState().renners.length > 0 ? `
             <button class="btn btn-sm btn-danger" onclick="deleteAlleRenners()">
               Wis alle renners
             </button>` : ''}
@@ -383,12 +384,12 @@ async function renderRennersTab() {
 window.updateKostprijs = async function(id, val) {
   const v = parseInt(val) || 1;
   await sb.from('renners').update({ kostprijs: v }).eq('id', id);
-  const r = state.renners.find(x => x.id === id);
+  const r = getState().renners.find(x => x.id === id);
   if (r) r.kostprijs = v;
 };
 
 window.deleteAlleRenners = async function() {
-  const n = state.renners.length;
+  const n = getState().renners.length;
   if (!confirm(`Alle ${n} renners verwijderen uit de database?\nDit verwijdert ook alle koers-koppelingen en gebruikersselecties.`)) return;
   loading(true);
   // Koers-koppelingen eerst verwijderen (foreign key)
@@ -397,7 +398,7 @@ window.deleteAlleRenners = async function() {
   await sb.from('user_team_renners').delete().neq('renner_id', '00000000-0000-0000-0000-000000000000');
   // Renners verwijderen
   await sb.from('renners').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-  state.renners = [];
+  getState().renners = [];
   loading(false);
   renderRennersTab();
 };
@@ -425,7 +426,7 @@ async function renderUitslagenTab() {
           <button class="btn btn-sm btn-danger" onclick="deleteUitslag('${u.id}')">✕</button>
         </div>`).join('');
 
-  const koersOpts = state.koersen.map(k =>
+  const koersOpts = getState().koersen.map(k =>
     `<option value="${k.id}">${k.naam}</option>`
   ).join('');
 
@@ -517,7 +518,7 @@ window.processSheets = async function() {
 
   document.getElementById('imp-prog-card').style.display = 'block';
   document.getElementById('imp-result-wrap').style.display = 'none';
-  const koersNaam = state.koersen.find(k => k.id === koersId)?.naam || '';
+  const koersNaam = getState().koersen.find(k => k.id === koersId)?.naam || '';
   const log = document.getElementById('prog-log');
   log.innerHTML = '';
   const results = [];
@@ -538,7 +539,7 @@ window.processSheets = async function() {
       sheet_naam:  sn,
       type:        'rit',
       rit_nummer:  parseInt(sn.replace(/\D/g, '')) || null,
-      imported_by: state.profile.id,
+      imported_by: getState().profile.id,
     }, { onConflict: 'koers_id,sheet_naam' }).select().single();
 
     if (uErr) { log.innerHTML += `<div>✗ ${sn}: ${uErr.message}</div>`; continue; }
@@ -571,7 +572,7 @@ window.processSheets = async function() {
   document.getElementById('prog-lbl').textContent  = 'Klaar!';
 
   const { data: rijen } = await sb.from('uitslag_rijen').select('*, uitslagen(type, koers_id)');
-  state.allUitslag_rijen = (rijen || []).map(r => ({
+  getState().allUitslag_rijen = (rijen || []).map(r => ({
     ...r, type: r.uitslagen?.type || 'rit', koers_id: r.uitslagen?.koers_id,
   }));
 
@@ -616,7 +617,7 @@ window.deleteUitslag = async function(id) {
 window.deleteAllUitslagen = async function() {
   await sb.from('uitslag_rijen').delete().neq('id', '00000000-0000-0000-0000-000000000000');
   await sb.from('uitslagen').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-  state.allUitslag_rijen = [];
+  getState().allUitslag_rijen = [];
   renderUitslagenTab();
 };
 
@@ -688,7 +689,7 @@ window.importCsvRenners = async function() {
       kostprijs = parseInt(p[2].trim());
     }
     if (isNaN(kostprijs)) { errors.push(`Ongeldige kostprijs: ${line}`); continue; }
-    const existing = state.renners.find(r => r.naam.toLowerCase().trim() === naam.toLowerCase().trim());
+    const existing = getState().renners.find(r => r.naam.toLowerCase().trim() === naam.toLowerCase().trim());
     if (existing) {
       // Update één voor één (updates gaan snel, zijn geen grote batches)
       const { error } = await sb.from('renners').update({ ploeg, kostprijs }).eq('id', existing.id);
@@ -705,7 +706,7 @@ window.importCsvRenners = async function() {
     const batch = toInsert.slice(i, i + BATCH);
     const { data: inserted, error } = await sb.from('renners').insert(batch).select();
     if (!error && inserted) {
-      inserted.forEach(nr => { state.renners.push({ ...nr, koers_ids: [] }); added++; });
+      inserted.forEach(nr => { getState().renners.push({ ...nr, koers_ids: [] }); added++; });
     } else if (error) {
       errors.push(`Batch insert mislukt (rij ${i}–${i + batch.length}): ${error.message}`);
     }
