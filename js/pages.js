@@ -17,7 +17,8 @@ export let state = {
 window._activeKF  = null;   // actieve koersfilter (koers id of null)
 window._filterFT  = '';     // geselecteerde ploeg
 window._filterFS  = 'naam'; // sorteerorder
-window._filterQ   = '';     // zoekterm
+window._filterQ      = '';     // zoekterm
+window._filterMaxK   = '';     // max kostprijs filter
 
 // ============================================================
 // PAGINERING HELPER
@@ -265,6 +266,15 @@ export function renderSelectiePage() {
           <option value="pd"    ${window._filterFS === 'pd'   ? 'selected' : ''}>Kostprijs ↓</option>
           <option value="pa"    ${window._filterFS === 'pa'   ? 'selected' : ''}>Kostprijs ↑</option>
         </select>
+        <div style="display:flex;align-items:center;gap:5px">
+          <span style="font-size:12px;color:var(--text2);white-space:nowrap">Max kostprijs:</span>
+          <input type="number" id="fmk" min="1"
+            value="${window._filterMaxK}"
+            placeholder="bv. 500"
+            oninput="onFilterMaxK(this.value)"
+            style="width:90px;margin-bottom:0"/>
+          ${window._filterMaxK ? `<button onclick="onFilterMaxK('')" style="background:none;border:none;cursor:pointer;font-size:14px;color:var(--text2);padding:0 2px" title="Wis filter">✕</button>` : ''}
+        </div>
       </div>
 
       <div id="ab" style="display:none"></div>
@@ -291,6 +301,7 @@ function _ploegOptions(geselecteerde) {
 window.onSearchInput  = function(v) { window._filterQ  = v;  renderRennerList(); };
 window.onFilterTeam   = function(v) { window._filterFT = v;  renderRennerList(); };
 window.onFilterSort   = function(v) { window._filterFS = v;  renderRennerList(); };
+window.onFilterMaxK   = function(v) { window._filterMaxK = v;  renderRennerList(); };
 
 // Koersfilter: update pills + herlaad ploegen dropdown + render lijst
 // Geen volledige pagina-rebuild — enkel de pills en dropdown bijwerken
@@ -343,6 +354,10 @@ export function renderRennerList() {
       r.naam.toLowerCase().includes(srch) ||
       r.ploeg.toLowerCase().includes(srch)
     );
+
+  const maxK = parseInt(window._filterMaxK);
+  if (!isNaN(maxK) && maxK > 0)
+    list = list.filter(r => r.kostprijs <= maxK);
 
   // Sorteren
   if      (fs === 'pd') list.sort((a, b) => b.kostprijs - a.kostprijs);
