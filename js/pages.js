@@ -4,7 +4,7 @@ import { jersey, normNaam, calcUserPtsFromRijen, calcRennerPtsFromRijen, fmtDL, 
 // ============================================================
 // STATE
 // ============================================================
-export let state = {
+export let state = window._appState = {
   profile:          null,
   settings:         {},
   koersen:          [],
