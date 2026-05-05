@@ -628,9 +628,12 @@ function renderCsvTab() {
     <div class="card">
       <div class="card-title">Renners importeren via CSV</div>
       <div class="alert ai" style="margin-bottom:.8rem">
-        Formaat: <code>naam;ploeg;kostprijs</code> per rij.<br>
+        Ondersteunde formaten per rij:<br>
+        <code>naam;ploeg;kostprijs</code> &nbsp;·&nbsp;
+        <code>naam;;kostprijs</code> (lege ploeg) &nbsp;·&nbsp;
+        <code>naam;kostprijs</code> (enkel naam+kostprijs)<br>
         <span style="font-size:11px">
-          Bestaande renners worden bijgewerkt (ploeg + kostprijs). Nieuwe renners worden toegevoegd.<br>
+          Bestaande renners worden bijgewerkt. Nieuwe renners worden toegevoegd.<br>
           <strong>Koers-deelname</strong> stel je apart in via het tabblad <strong>Koersen</strong>.
         </span>
       </div>
@@ -665,11 +668,26 @@ window.importCsvRenners = async function() {
   const toInsert = [];
   for (const line of lines) {
     const p = line.split(';');
-    if (p.length < 3) { errors.push(`Ongeldig formaat: ${line}`); continue; }
-    const naam      = p[0].trim();
-    const ploeg     = p[1].trim();
-    const kostprijs = parseInt(p[2].trim());
-    if (!naam || !ploeg || isNaN(kostprijs)) { errors.push(`Ongeldige waarden: ${line}`); continue; }
+    if (p.length < 2) { errors.push(`Ongeldig formaat: ${line}`); continue; }
+    const naam = p[0].trim();
+    if (!naam) { errors.push(`Lege naam: ${line}`); continue; }
+
+    // Flexibel formaat: naam;ploeg;kostprijs  OF  naam;kostprijs  OF  naam;;kostprijs
+    let ploeg, kostprijs;
+    if (p.length >= 3 && isNaN(parseInt(p[1].trim()))) {
+      // naam;ploeg;kostprijs
+      ploeg     = p[1].trim();
+      kostprijs = parseInt(p[2].trim());
+    } else if (p.length >= 2 && !isNaN(parseInt(p[1].trim()))) {
+      // naam;kostprijs (geen ploeg)
+      ploeg     = '';
+      kostprijs = parseInt(p[1].trim());
+    } else {
+      // naam;;kostprijs (lege ploeg)
+      ploeg     = p[1].trim();
+      kostprijs = parseInt(p[2].trim());
+    }
+    if (isNaN(kostprijs)) { errors.push(`Ongeldige kostprijs: ${line}`); continue; }
     const existing = state.renners.find(r => r.naam.toLowerCase().trim() === naam.toLowerCase().trim());
     if (existing) {
       // Update één voor één (updates gaan snel, zijn geen grote batches)
