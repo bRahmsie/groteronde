@@ -6,34 +6,40 @@ import {
   renderMijnPloeg, renderKlassement,
 } from './pages.js';
 
-// XLSX library (globaal beschikbaar via CDN)
-const xlsxScript = document.createElement('script');
-xlsxScript.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
-document.head.appendChild(xlsxScript);
+// XLSX via CDN — geladen na imports
+(function() {
+  const s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+  document.head.appendChild(s);
+})();
 
 // ============================================================
 // AUTH
 // ============================================================
-export function switchAuth(t) {
+window.switchAuth = function(t) {
   ['login','register'].forEach(x => {
     document.getElementById('tab-'+x).classList.toggle('active', x === t);
     document.getElementById(x+'-form').style.display = x === t ? 'block' : 'none';
   });
-}
-window.switchAuth = switchAuth;
+};
 
-export async function doLogin() {
+window.doLogin = async function() {
   const email = document.getElementById('le').value.trim().toLowerCase();
   const pw    = document.getElementById('lp').value;
   document.getElementById('lerr').style.display = 'none';
   loading(true);
-  const { error } = await sb.auth.signInWithPassword({ email, password: pw });
-  loading(false);
-  if (error) { showAlert('lerr', error.message); return; }
-}
-window.doLogin = doLogin;
+  const { data, error } = await sb.auth.signInWithPassword({ email, password: pw });
+  if (error) {
+    loading(false);
+    showAlert('lerr', error.message);
+    return;
+  }
+  if (data?.session) {
+    await handleSession(data.session);
+  }
+};
 
-export async function doRegister() {
+window.doRegister = async function() {
   const naam  = document.getElementById('rn').value.trim();
   const email = document.getElementById('re').value.trim().toLowerCase();
   const pw    = document.getElementById('rp').value;
@@ -47,18 +53,89 @@ export async function doRegister() {
   if (error) { showAlert('rerr', error.message); return; }
   showAlert('rsuc', 'Account aangemaakt! Meld je nu aan.', 'as');
   ['rn','re','rp'].forEach(id => document.getElementById(id).value = '');
-}
-window.doRegister = doRegister;
+};
 
-export async function doLogout() {
+window.doLogout = async function() {
   await sb.auth.signOut();
+};
+
+// ============================================================
+// SESSION HANDLER
+// ============================================================
+async function handleSession(session) {
+  if (!session?.user) {
+    state.profile = null;
+    document.getElementById('main-screen').style.display = 'none';
+    document.getElementById('auth-screen').style.display = 'block';
+    loading(false);
+    return;
+  }
+
+  loading(true);
+  try {
+    // Profiel ophalen of aanmaken
+    let { data: profile } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
+    if (!profile) {
+      const naam = session.user.user_metadata?.naam || session.user.email.split('@')[0];
+      const { data: np } = await sb.from('profiles')
+        .insert({ id: session.user.id, naam, email: session.user.email, is_admin: false })
+        .select().single();
+      profile = np;
+    }
+    if (!profile) {
+      loading(false);
+      showAlert('lerr', 'Profiel niet gevonden.');
+      return;
+    }
+    state.profile = profile;
+
+    // Actieve competitie
+    const { data: teams } = await sb
+      .from('user_teams').select('competitie').eq('user_id', profile.id).limit(1);
+    window._activeComp = teams?.[0]?.competitie || 'normal';
+
+    // Alle data laden
+    await loadAllData();
+
+  } catch(e) {
+    console.error('handleSession fout:', e);
+    loading(false);
+    showAlert('lerr', 'Fout bij laden: ' + e.message);
+    return;
+  }
+
+  loading(false);
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('main-screen').style.display = 'block';
+  document.getElementById('nav-admin').style.display =
+    state.profile.is_admin ? 'inline-block' : 'none';
+  goPage('competitie');
 }
-window.doLogout = doLogout;
+
+// Uitloggen via onAuthStateChange
+sb.auth.onAuthStateChange((event, session) => {
+  if (event === 'SIGNED_OUT') {
+    state.profile = null;
+    document.getElementById('main-screen').style.display = 'none';
+    document.getElementById('auth-screen').style.display = 'block';
+    loading(false);
+  }
+});
+
+// Bestaande sessie bij pagina laden
+(async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) {
+    await handleSession(session);
+  } else {
+    loading(false);
+  }
+})();
 
 // ============================================================
 // NAVIGATIE
 // ============================================================
-export function goPage(p) {
+window.goPage = function(p) {
   ['competitie','selectie','mijnploeg','klassement','admin'].forEach(x => {
     document.getElementById('page-'+x).classList.toggle('active', x === p);
     const t = document.getElementById('nav-'+x);
@@ -69,22 +146,21 @@ export function goPage(p) {
   if (p === 'mijnploeg')  renderMijnPloeg();
   if (p === 'klassement') renderKlassement();
   if (p === 'admin') {
-    import('./admin.js').then(m => m.renderAdminPage()).catch(e => {
-      console.error('Admin module laadfout:', e);
-      document.getElementById('page-admin').innerHTML =
-        '<div style="padding:1rem"><div class="alert ad">Admin module kon niet geladen worden: ' + e.message + '</div></div>';
-    });
+    import('./admin.js')
+      .then(m => m.renderAdminPage())
+      .catch(e => {
+        document.getElementById('page-admin').innerHTML =
+          `<div style="padding:1rem"><div class="alert ad">Admin laadprobleem: ${e.message}</div></div>`;
+      });
   }
-}
-window.goPage = goPage;
+};
 
 // ============================================================
 // COMPETITIE ACTIES
 // ============================================================
 window.savePloegNaam = async function(comp) {
   comp = comp || window._activeComp || 'normal';
-  const naam = document.getElementById(`pn-${comp}`)?.value.trim() || '';
-  // Zorg dat het team bestaat
+  const naam = document.getElementById('pn-' + comp)?.value.trim() || '';
   if (!state.myTeams[comp]) {
     const { data } = await sb.from('user_teams')
       .insert({ user_id: state.profile.id, competitie: comp, ploeg_naam: naam })
@@ -94,14 +170,16 @@ window.savePloegNaam = async function(comp) {
     await sb.from('user_teams').update({ ploeg_naam: naam }).eq('id', state.myTeams[comp].id);
     state.myTeams[comp].ploeg_naam = naam;
   }
-  const el = document.getElementById(`pn-saved-${comp}`);
-  if (el) { el.style.display = 'block'; clearTimeout(window._pnt); window._pnt = setTimeout(() => el.style.display = 'none', 2000); }
+  const el = document.getElementById('pn-saved-' + comp);
+  if (el) {
+    el.style.display = 'block';
+    clearTimeout(window._pnt);
+    window._pnt = setTimeout(() => el.style.display = 'none', 2000);
+  }
   renderCompPage();
 };
 
-// switchComp: wissel de actief getoonde competitie (selectie + mijn ploeg)
 window.switchComp = async function(comp) {
-  // Zorg dat het team bestaat in DB
   if (!state.myTeams[comp]) {
     const { data } = await sb.from('user_teams')
       .insert({ user_id: state.profile.id, competitie: comp, ploeg_naam: '' })
@@ -109,14 +187,12 @@ window.switchComp = async function(comp) {
     if (data) state.myTeams[comp] = { id: data.id, ploeg_naam: '', renner_ids: [] };
   }
   window._activeComp = comp;
-  // Herrender de huidige pagina
   const activePage = document.querySelector('.page.active')?.id;
   if (activePage === 'page-selectie')   renderSelectiePage();
   if (activePage === 'page-mijnploeg')  renderMijnPloeg();
   if (activePage === 'page-competitie') renderCompPage();
 };
 
-// goToSelectie: vanuit competitiepagina naar selectie voor een specifieke comp
 window.goToSelectie = async function(comp) {
   if (!state.myTeams[comp]) {
     const { data } = await sb.from('user_teams')
@@ -125,36 +201,35 @@ window.goToSelectie = async function(comp) {
     if (data) state.myTeams[comp] = { id: data.id, ploeg_naam: '', renner_ids: [] };
   }
   window._activeComp = comp;
-  goPage('selectie');
+  window.goPage('selectie');
 };
 
 // ============================================================
 // SELECTIE ACTIES
 // ============================================================
 window.setKF = function(koersId) {
-  const { activeKF: _kf, ...rest } = window; // workaround
   window._activeKF = koersId;
-  // Update module-level variable via re-import is not possible;
-  // gebruik global
-  window.__activeKF = koersId;
-  renderSelectiePage();
+  window._filterFT = '';
+  const pills = document.querySelectorAll('.pill-filter');
+  pills.forEach(el => {
+    const oc = el.getAttribute('onclick') || '';
+    el.classList.toggle('active',
+      koersId === null ? oc.includes('null') : oc.includes("'" + koersId + "'")
+    );
+  });
+  const ftEl = document.getElementById('ft');
+  if (ftEl) {
+    // rebuild ploegen dropdown via renderRennerList
+  }
+  renderRennerList();
 };
-
-// Overschrijf activeKF in pages.js via global trick
-Object.defineProperty(window, '__activeKF', {
-  set(v) { window.__activeKF_val = v; },
-  get()  { return window.__activeKF_val ?? null; },
-});
 
 window.toggleRenner = async function(rennerId) {
   const comp = window._activeComp || 'normal';
-  const s = state.settings[comp] || {};
   const team = state.myTeams[comp];
   if (!team) return;
-
-  const sel = team.renner_ids;
+  const sel  = team.renner_ids;
   const isIn = sel.includes(rennerId);
-
   if (isIn) {
     await sb.from('user_team_renners').delete()
       .eq('team_id', team.id).eq('renner_id', rennerId);
@@ -163,7 +238,6 @@ window.toggleRenner = async function(rennerId) {
     await sb.from('user_team_renners').insert({ team_id: team.id, renner_id: rennerId });
     team.renner_ids = [...sel, rennerId];
   }
-  // Herrender enkel de lijst + metrics, NIET de hele pagina (behoudt zoekterm/filters)
   renderRennerList();
 };
 
@@ -203,36 +277,3 @@ window.resetPloeg = async function() {
 // KLASSEMENT
 // ============================================================
 window.renderKlassement = renderKlassement;
-
-// ============================================================
-// AUTH STATE LISTENER — start app
-// ============================================================
-sb.auth.onAuthStateChange(async (event, session) => {
-  if (session?.user) {
-    // Profiel ophalen
-    const { data: profile } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
-    if (!profile) return;
-
-    // Zet actieve competitie op meest recente team van de gebruiker
-    const { data: teams } = await sb.from('user_teams').select('competitie').eq('user_id', profile.id).limit(1);
-    window._activeComp = teams?.[0]?.competitie || 'normal';
-
-    state.profile = profile;
-
-    // Data laden
-    await loadAllData();
-
-    // UI tonen
-    document.getElementById('auth-screen').style.display = 'none';
-    document.getElementById('main-screen').style.display = 'block';
-    document.getElementById('nav-admin').style.display = profile.is_admin ? 'inline-block' : 'none';
-
-    goPage('competitie');
-
-  } else {
-    // Uitgelogd
-    state.profile = null;
-    document.getElementById('main-screen').style.display = 'none';
-    document.getElementById('auth-screen').style.display = 'block';
-  }
-});
