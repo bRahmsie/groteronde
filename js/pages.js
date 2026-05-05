@@ -79,12 +79,13 @@ export async function loadAllData() {
 
     // Uitslag rijen — kan ook groot zijn
     const rijData = await fetchAll(
-      sb.from('uitslag_rijen').select('*, uitslagen(type, koers_id)')
+      sb.from('uitslag_rijen').select('*, uitslagen(type, koers_id, sheet_naam)')
     );
     state.allUitslag_rijen = rijData.map(r => ({
       ...r,
-      type:     r.uitslagen?.type     || 'rit',
-      koers_id: r.uitslagen?.koers_id,
+      type:      r.uitslagen?.type      || 'rit',
+      koers_id:  r.uitslagen?.koers_id,
+      sheet_naam: r.uitslagen?.sheet_naam || '',
     }));
 
   } finally {
@@ -577,9 +578,11 @@ export function renderMijnPloeg() {
 // KLASSEMENT
 // ============================================================
 export async function renderKlassement() {
-  const comp        = document.getElementById('kl-comp')?.value  || 'normal';
-  const koersFilter = document.getElementById('kl-koers')?.value || '';
+  const comp        = document.getElementById('kl-comp')?.value   || 'normal';
+  const koersFilter = document.getElementById('kl-koers')?.value  || '';
+  const ritFilter   = document.getElementById('kl-rit')?.value    || '';
 
+  // Laad teams met renners
   const { data: teams } = await sb
     .from('user_teams')
     .select('*, profiles(naam), user_team_renners(renner_id, renners(naam))')
@@ -587,54 +590,163 @@ export async function renderKlassement() {
 
   const s = cSett(comp);
 
+  // Beschikbare ritten op basis van koersfilter
+  const uitslagenVoorKoers = koersFilter
+    ? state.allUitslag_rijen.filter(r => r.koers_id === koersFilter)
+    : state.allUitslag_rijen;
+
+  // Unieke uitslag_ids met hun sheet_naam ophalen voor de rit-dropdown
+  const ritMap = {};
+  uitslagenVoorKoers.forEach(r => {
+    if (r.uitslag_id && r.sheet_naam) ritMap[r.uitslag_id] = r.sheet_naam;
+  });
+  // Haal sheet_namen op via state uitslagen indien beschikbaar
+  // Gebruik uitslag_id als key, sheet_naam via apart ophalen indien nodig
+  const rittenIds = [...new Set(uitslagenVoorKoers.map(r => r.uitslag_id).filter(Boolean))];
+
+  // Filter rijen op rit indien geselecteerd
+  let rijFilter = uitslagenVoorKoers;
+  if (ritFilter) {
+    rijFilter = uitslagenVoorKoers.filter(r => r.uitslag_id === ritFilter);
+  }
+
+  // Bereken punten per team
   const rows = (teams || []).map(t => {
     const rennerNamen = (t.user_team_renners || [])
-      .map(utr => utr.renners?.naam)
-      .filter(Boolean);
-    const rijFilter = koersFilter
-      ? state.allUitslag_rijen.filter(r => r.koers_id === koersFilter)
-      : state.allUitslag_rijen;
+      .map(utr => utr.renners?.naam).filter(Boolean);
     const pts      = calcUserPtsFromRijen(rijFilter, rennerNamen);
     const compleet = rennerNamen.length === s.max_renners;
+
+    // Detail: punten per renner (voor uitklap)
+    const norm = n => (n || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const rennerDetail = rennerNamen.map(naam => {
+      // Punten per uitslag voor deze renner (top-10 logica zit in calcUserPts)
+      const rennerRijen = rijFilter.filter(r => norm(r.renner_naam) === norm(naam));
+      const pts_totaal  = rennerRijen.reduce((s, r) => s + (r.totaal || 0), 0);
+      const breakdown   = rennerRijen.map(r => ({
+        sheet: r.sheet_naam || r.uitslag_id?.slice(0,8),
+        pts_rit: r.pts_rit, pts_gc: r.pts_gc, pts_points: r.pts_points,
+        pts_berg: r.pts_berg, pts_jeugd: r.pts_jeugd, pts_bonus: r.pts_bonus,
+        totaal: r.totaal
+      })).filter(r => r.totaal > 0);
+      return { naam, pts_totaal, breakdown };
+    }).filter(r => r.pts_totaal > 0).sort((a, b) => b.pts_totaal - a.pts_totaal);
+
     return {
       naam: t.profiles?.naam || '—',
       ploeg_naam: t.ploeg_naam,
-      pts, compleet,
+      pts, compleet, rennerDetail,
       n: rennerNamen.length,
+      uid: t.id,
     };
   }).sort((a, b) => b.pts - a.pts || a.naam.localeCompare(b.naam));
 
+  // Dropdown opties
   const koersOpts = state.koersen.map(k =>
     `<option value="${k.id}"${k.id === koersFilter ? ' selected' : ''}>${k.naam}</option>`
   ).join('');
+
+  // Rit-dropdown: haal sheet_namen op
+  // Probeer uit de cached uitslag_rijen de sheet_naam te halen
+  const ritOpts = rittenIds.map(id => {
+    const rij = uitslagenVoorKoers.find(r => r.uitslag_id === id);
+    const label = rij?.sheet_naam || id.slice(0,8);
+    return `<option value="${id}"${id === ritFilter ? ' selected' : ''}>${label}</option>`;
+  }).sort((a, b) => {
+    // Sorteer op label
+    const la = a.match(/>(.+)</)?.[1] || '';
+    const lb = b.match(/>(.+)</)?.[1] || '';
+    return la.localeCompare(lb, undefined, { numeric: true });
+  }).join('');
+
+  // Tabel rijen
+  const tabelRijen = rows.map((r, i) => {
+    const detailId = `kl-detail-${r.uid}`;
+    const detailHtml = r.rennerDetail.length === 0
+      ? '<div style="font-size:12px;color:var(--text2);padding:.5rem">Geen gescoorde punten.</div>'
+      : `<table style="margin-top:.4rem">
+          <thead><tr>
+            <th>Renner</th><th>Rit</th><th>Berg</th><th>GC</th><th>Punten</th><th>Jeugd</th><th>Bonus</th><th>Totaal</th>
+          </tr></thead>
+          <tbody>${r.rennerDetail.map(rd => {
+            const rows = rd.breakdown.map(b =>
+              `<tr>
+                <td style="color:var(--text2);font-size:11px">${b.sheet || '?'}</td>
+                <td>${b.pts_rit   > 0 ? `<span class="pts-pill pts-pos">+${b.pts_rit}</span>`   : '-'}</td>
+                <td>${b.pts_berg  > 0 ? `<span class="pts-pill pts-pos">+${b.pts_berg}</span>`  : '-'}</td>
+                <td>${b.pts_gc    > 0 ? `<span class="pts-pill pts-pos">+${b.pts_gc}</span>`    : '-'}</td>
+                <td>${b.pts_points> 0 ? `<span class="pts-pill pts-pos">+${b.pts_points}</span>`: '-'}</td>
+                <td>${b.pts_jeugd > 0 ? `<span class="pts-pill pts-pos">+${b.pts_jeugd}</span>` : '-'}</td>
+                <td>${b.pts_bonus > 0 ? `<span class="pts-pill by">+${b.pts_bonus}</span>`      : '-'}</td>
+                <td><strong><span class="pts-pill pts-pos">+${b.totaal}</span></strong></td>
+              </tr>`
+            ).join('');
+            return `<tr style="background:var(--bg3)">
+              <td colspan="8" style="padding:4px 8px 2px 8px">
+                <strong style="font-size:12px">${rd.naam}</strong>
+                <span class="pts-pill pts-pos" style="margin-left:6px">+${rd.pts_totaal} totaal</span>
+              </td>
+            </tr>${rows}`;
+          }).join('')}</tbody>
+        </table>`;
+
+    return `<tr>
+      <td class="${i===0?'rg':i===1?'rs':i===2?'rb':''}">${i+1}</td>
+      <td style="font-weight:500">${r.naam}</td>
+      <td style="color:var(--text2)">${r.ploeg_naam||'—'}</td>
+      <td>${r.n}/${s.max_renners}</td>
+      <td><span class="badge ${r.compleet?'bg':'br'}">${r.compleet?'✓':'✗'}</span></td>
+      <td>
+        <span class="pts-pill ${r.pts>0?'pts-pos':'pts-zero'}"
+          style="font-size:13px;padding:2px 9px;cursor:${r.pts>0?'pointer':'default'}"
+          onclick="${r.pts>0?`toggleKlDetail('${detailId}')`:''}">
+          ${r.pts}${r.pts>0?' ▾':''}
+        </span>
+      </td>
+    </tr>
+    <tr id="${detailId}" style="display:none">
+      <td colspan="6" style="padding:4px 8px 10px 28px;background:var(--bg3)">
+        ${detailHtml}
+      </td>
+    </tr>`;
+  }).join('');
 
   document.getElementById('page-klassement').innerHTML = `
     <div class="card">
       <div class="sh">
         <div class="card-title" style="margin-bottom:0">Klassement</div>
-        <div style="display:flex;gap:6px">
-          <select id="kl-comp" style="width:120px;margin-bottom:0" onchange="renderKlassement()">
-            <option value="normal"${comp === 'normal' ? ' selected' : ''}>Normaal</option>
-            <option value="pro"${comp === 'pro'    ? ' selected' : ''}>Pro</option>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <select id="kl-comp" style="width:110px;margin-bottom:0" onchange="renderKlassement()">
+            <option value="normal"${comp==='normal'?' selected':''}>Normaal</option>
+            <option value="pro"${comp==='pro'?' selected':''}>Pro</option>
           </select>
-          <select id="kl-koers" style="width:150px;margin-bottom:0" onchange="renderKlassement()">
+          <select id="kl-koers" style="width:150px;margin-bottom:0" onchange="klKoersChange()">
             <option value="">Alle koersen</option>${koersOpts}
+          </select>
+          <select id="kl-rit" style="width:130px;margin-bottom:0" onchange="renderKlassement()"
+            ${!koersFilter?'disabled':''}>
+            <option value="">Alle ritten</option>${ritOpts}
           </select>
         </div>
       </div>
-      ${rows.length === 0
+      ${rows.length===0
         ? '<div style="font-size:13px;color:var(--text2);padding:.5rem">Geen deelnemers.</div>'
         : `<table><thead><tr>
              <th>#</th><th>Deelnemer</th><th>Ploegnaam</th><th>Renners</th><th>Status</th><th>Punten</th>
            </tr></thead>
-           <tbody>${rows.map((r, i) => `<tr>
-             <td class="${i === 0 ? 'rg' : i === 1 ? 'rs' : i === 2 ? 'rb' : ''}">${i + 1}</td>
-             <td style="font-weight:500">${r.naam}</td>
-             <td style="color:var(--text2)">${r.ploeg_naam || '—'}</td>
-             <td>${r.n}/${s.max_renners}</td>
-             <td><span class="badge ${r.compleet ? 'bg' : 'br'}">${r.compleet ? '✓ Compleet' : 'Incompleet'}</span></td>
-             <td><span class="pts-pill ${r.pts > 0 ? 'pts-pos' : 'pts-zero'}"
-               style="font-size:13px;padding:2px 9px">${r.pts}</span></td>
-           </tr>`).join('')}</tbody></table>`}
+           <tbody>${tabelRijen}</tbody></table>`}
     </div>`;
 }
+
+window.klKoersChange = function() {
+  // Reset rit-filter bij koerswisseling
+  const ritEl = document.getElementById('kl-rit');
+  if (ritEl) ritEl.value = '';
+  renderKlassement();
+};
+
+window.toggleKlDetail = function(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? 'table-row' : 'none';
+};
