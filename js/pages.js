@@ -11,6 +11,7 @@ export let state = window._appState = {
   renners:          [],
   myTeams:          {},
   allUitslag_rijen: [],
+  uitslagen: [],       // [{id, koers_id, sheet_naam, type}]
 };
 
 // Filterstate — globaal en persistent zodat renner selecteren ze niet reset
@@ -77,16 +78,25 @@ export async function loadAllData() {
       koers_ids: (r.renner_koersen || []).map(rk => rk.koers_id),
     }));
 
+    // Uitslagen (metadata) — klein, snel laden
+    const { data: uitslagenData } = await sb
+      .from('uitslagen').select('id, koers_id, sheet_naam, type');
+    state.uitslagen = uitslagenData || [];
+
     // Uitslag rijen — kan ook groot zijn
     const rijData = await fetchAll(
-      sb.from('uitslag_rijen').select('*, uitslagen(type, koers_id, sheet_naam)')
+      sb.from('uitslag_rijen').select('*, uitslagen(type, koers_id)')
     );
-    state.allUitslag_rijen = rijData.map(r => ({
-      ...r,
-      type:      r.uitslagen?.type      || 'rit',
-      koers_id:  r.uitslagen?.koers_id,
-      sheet_naam: r.uitslagen?.sheet_naam || '',
-    }));
+    // Koppel sheet_naam via state.uitslagen lookup
+    state.allUitslag_rijen = rijData.map(r => {
+      const u = state.uitslagen.find(x => x.id === r.uitslag_id);
+      return {
+        ...r,
+        type:       u?.type      || 'rit',
+        koers_id:   u?.koers_id,
+        sheet_naam: u?.sheet_naam || '',
+      };
+    });
 
   } finally {
     loading(false);
@@ -590,25 +600,18 @@ export async function renderKlassement() {
 
   const s = cSett(comp);
 
-  // Beschikbare ritten op basis van koersfilter
+  // Beschikbare ritten op basis van koersfilter — gebruik state.uitslagen (metadata)
   const uitslagenVoorKoers = koersFilter
-    ? state.allUitslag_rijen.filter(r => r.koers_id === koersFilter)
-    : state.allUitslag_rijen;
+    ? state.uitslagen.filter(u => u.koers_id === koersFilter)
+    : state.uitslagen;
 
-  // Unieke uitslag_ids met hun sheet_naam ophalen voor de rit-dropdown
-  const ritMap = {};
-  uitslagenVoorKoers.forEach(r => {
-    if (r.uitslag_id && r.sheet_naam) ritMap[r.uitslag_id] = r.sheet_naam;
-  });
-  // Haal sheet_namen op via state uitslagen indien beschikbaar
-  // Gebruik uitslag_id als key, sheet_naam via apart ophalen indien nodig
-  const rittenIds = [...new Set(uitslagenVoorKoers.map(r => r.uitslag_id).filter(Boolean))];
+  // Uitslag_ids voor de rit-dropdown
+  const rittenIds = uitslagenVoorKoers.map(u => u.id);
 
-  // Filter rijen op rit indien geselecteerd
-  let rijFilter = uitslagenVoorKoers;
-  if (ritFilter) {
-    rijFilter = uitslagenVoorKoers.filter(r => r.uitslag_id === ritFilter);
-  }
+  // Filter rijen (de scores) op koers en/of rit
+  let rijFilter = state.allUitslag_rijen;
+  if (koersFilter) rijFilter = rijFilter.filter(r => r.koers_id === koersFilter);
+  if (ritFilter)   rijFilter = rijFilter.filter(r => r.uitslag_id === ritFilter);
 
   // Bereken punten per team
   const rows = (teams || []).map(t => {
@@ -646,18 +649,12 @@ export async function renderKlassement() {
     `<option value="${k.id}"${k.id === koersFilter ? ' selected' : ''}>${k.naam}</option>`
   ).join('');
 
-  // Rit-dropdown: haal sheet_namen op
-  // Probeer uit de cached uitslag_rijen de sheet_naam te halen
-  const ritOpts = rittenIds.map(id => {
-    const rij = uitslagenVoorKoers.find(r => r.uitslag_id === id);
-    const label = rij?.sheet_naam || id.slice(0,8);
-    return `<option value="${id}"${id === ritFilter ? ' selected' : ''}>${label}</option>`;
-  }).sort((a, b) => {
-    // Sorteer op label
-    const la = a.match(/>(.+)</)?.[1] || '';
-    const lb = b.match(/>(.+)</)?.[1] || '';
-    return la.localeCompare(lb, undefined, { numeric: true });
-  }).join('');
+  // Rit-dropdown: gebruik state.uitslagen voor sheet_naam
+  const ritOpts = uitslagenVoorKoers
+    .slice()
+    .sort((a, b) => (a.sheet_naam || '').localeCompare(b.sheet_naam || '', undefined, { numeric: true }))
+    .map(u => `<option value="${u.id}"${u.id === ritFilter ? ' selected' : ''}>${u.sheet_naam || u.id.slice(0,8)}</option>`)
+    .join('');
 
   // Tabel rijen
   const tabelRijen = rows.map((r, i) => {
