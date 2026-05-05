@@ -1,6 +1,6 @@
 import { sb } from './supabase.js';
 import { jersey, parseSheet, fmtDL, cDown, loading, showAlert } from './helpers.js';
-import { state, renderSelectiePage, renderRennerList } from './pages.js';
+import { state } from './pages.js';
 
 // ============================================================
 // ADMIN PAGINA HOOFDRENDER
