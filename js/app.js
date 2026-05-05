@@ -9,7 +9,7 @@ import { sb } from './supabase.js';
 import { loading, showAlert } from './helpers.js';
 import {
   state, loadAllData,
-  renderCompPage, renderSelectiePage, refreshRennerList,
+  renderCompPage, renderSelectiePage, renderRennerList,
   renderMijnPloeg, renderKlassement,
 } from './pages.js';
 import { renderAdminPage, switchATab } from './admin.js';
@@ -161,7 +161,7 @@ window.toggleRenner = async function(rennerId) {
     team.renner_ids = [...sel, rennerId];
   }
   // Herrender enkel de lijst + metrics, NIET de hele pagina (behoudt zoekterm/filters)
-  refreshRennerList();
+  renderRennerList();
 };
 
 window.showAlertBox = function(msg) {
