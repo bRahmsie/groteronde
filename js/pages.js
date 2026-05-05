@@ -19,6 +19,7 @@ window._filterFT  = '';     // geselecteerde ploeg
 window._filterFS  = 'naam'; // sorteerorder
 window._filterQ      = '';     // zoekterm
 window._filterMaxK   = '';     // max kostprijs filter
+window._activeComp   = 'normal'; // actief geselecteerde competitie in selectie/mijnploeg
 
 // ============================================================
 // PAGINERING HELPER
@@ -94,7 +95,7 @@ export async function loadAllData() {
 // ============================================================
 // HELPERS
 // ============================================================
-function cC()      { return state.profile?.competitie || null; }
+function cC()      { return window._activeComp || 'normal'; }
 function cSett(c)  { return state.settings[c || cC()] || {}; }
 function myTeam(c) { return state.myTeams[c || cC() || 'normal'] || { renner_ids: [], ploeg_naam: '' }; }
 
@@ -126,7 +127,6 @@ export function isLocked(comp) {
 // COMPETITIE PAGINA
 // ============================================================
 export function renderCompPage() {
-  const p  = state.profile;
   const ns = cSett('normal');
   const ps = cSett('pro');
 
@@ -136,82 +136,108 @@ export function renderCompPage() {
     return `<div style="margin-top:5px"><span class="countdown ${cd.c}">⏱ ${cd.t}</span></div>`;
   };
 
+  const compBlock = (comp) => {
+    const s       = comp === 'normal' ? ns : ps;
+    const team    = myTeam(comp);
+    const sel     = team.renner_ids;
+    const locked  = isLocked(comp);
+    const compleet = isComplete(comp);
+    const label   = comp === 'normal' ? 'NORMAAL' : 'PRO';
+    const kleur   = comp === 'normal'
+      ? 'background:var(--green-light);color:var(--green-dark)'
+      : 'background:var(--amber-light);color:var(--amber-text)';
+    const hasTeam = !!state.myTeams[comp];
+
+    return `<div class="card">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:.8rem">
+        <div style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:var(--radius);${kleur};display:inline-block">${label}</div>
+        ${hasTeam && compleet ? '<span class="badge bg">✓ Compleet</span>' : ''}
+        ${hasTeam && !compleet && sel.length > 0 ? `<span class="badge by">${sel.length}/${s.max_renners} renners</span>` : ''}
+        ${hasTeam && sel.length === 0 ? '<span class="badge">Nog geen renners</span>' : ''}
+        ${!hasTeam ? '<span class="badge" style="color:var(--text2)">Niet ingeschreven</span>' : ''}
+      </div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:.8rem">
+        Kostprijs: <strong>${s.budget || 1000}</strong> ·
+        Renners: <strong>${s.max_renners || 15}</strong> ·
+        Max/ploeg: <strong>${s.max_per_team || 3}</strong>
+        ${dlBadge(s)}
+      </div>
+      <div style="margin-bottom:.8rem">
+        <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Ploegnaam</label>
+        <div style="display:flex;gap:7px">
+          <input type="text" id="pn-${comp}" placeholder="bv. The Flying Dutchmen"
+            value="${team.ploeg_naam || ''}" style="margin-bottom:0;flex:1"
+            ${locked ? 'disabled' : ''}/>
+          <button class="btn btn-primary btn-sm" onclick="savePloegNaam('${comp}')"
+            ${locked ? 'disabled' : ''}>Opslaan</button>
+        </div>
+        <div id="pn-saved-${comp}" style="display:none;font-size:12px;color:var(--green);margin-top:4px">✓ Opgeslagen!</div>
+      </div>
+      ${locked
+        ? `<div class="alert ad" style="font-size:12px;margin-bottom:.5rem">🔒 Deadline verstreken — selectie gesloten.</div>`
+        : ''}
+      <button class="btn btn-primary w100" onclick="goToSelectie('${comp}')"
+        ${locked ? 'disabled' : ''}>
+        ${locked ? 'Selectieperiode gesloten' : `Ga naar selectie — ${label}`}
+      </button>
+    </div>`;
+  };
+
   document.getElementById('page-competitie').innerHTML = `
-    <div class="card">
-      <div class="card-title">Ploegnaam</div>
-      <div style="display:flex;gap:7px">
-        <input type="text" id="pn-input" placeholder="bv. The Flying Dutchmen"
-          value="${p.ploeg_naam || ''}" style="margin-bottom:0;flex:1"
-          ${isLocked(p.competitie) ? 'disabled' : ''}/>
-        <button class="btn btn-primary" onclick="savePloegNaam()"
-          ${isLocked(p.competitie) ? 'disabled' : ''}>Opslaan</button>
-      </div>
-      <div id="pn-saved" style="display:none;font-size:12px;color:var(--green);margin-top:4px">✓ Opgeslagen!</div>
+    <div class="alert ai" style="margin-bottom:.8rem;font-size:12px">
+      Je kan aan <strong>beide</strong> competities deelnemen met een aparte ploeg per competitie.
     </div>
-    <div class="g2" style="margin-bottom:.8rem">
-      <div class="cc ${p.competitie === 'normal' ? 'ac' : ''}" onclick="selComp('normal')">
-        <div style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:var(--radius);background:var(--green-light);color:var(--green-dark);display:inline-block;margin-bottom:5px">NORMAAL</div>
-        <div style="font-size:14px;font-weight:500;margin-bottom:4px">Normaal</div>
-        <div style="font-size:11px;color:var(--text2)">
-          Kostprijs: <strong>${ns.budget || 1000}</strong> ·
-          Renners: <strong>${ns.max_renners || 15}</strong> ·
-          Max/ploeg: <strong>${ns.max_per_team || 3}</strong>
-        </div>
-        ${dlBadge(ns)}
-      </div>
-      <div class="cc ${p.competitie === 'pro' ? 'ac' : ''}" onclick="selComp('pro')">
-        <div style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:var(--radius);background:var(--amber-light);color:var(--amber-text);display:inline-block;margin-bottom:5px">PRO</div>
-        <div style="font-size:14px;font-weight:500;margin-bottom:4px">Pro</div>
-        <div style="font-size:11px;color:var(--text2)">
-          Kostprijs: <strong>${ps.budget || 750}</strong> ·
-          Renners: <strong>${ps.max_renners || 10}</strong> ·
-          Max/ploeg: <strong>${ps.max_per_team || 2}</strong>
-        </div>
-        ${dlBadge(ps)}
-      </div>
-    </div>
-    ${p.competitie
-      ? `<div class="alert as">${p.competitie === 'normal' ? 'Normaal' : 'Pro'}${p.ploeg_naam ? ' · ' + p.ploeg_naam : ''}</div>`
-      : ''}
-    <button class="btn btn-primary w100" onclick="bevestigComp()"
-      ${isLocked(p.competitie) ? 'disabled' : ''}>
-      ${isLocked(p.competitie) ? 'Selectieperiode gesloten' : 'Bevestig &amp; ga naar selectie'}
-    </button>`;
+    ${compBlock('normal')}
+    ${compBlock('pro')}`;
 }
 
-// ============================================================
-// SELECTIE PAGINA — bouw het frame éénmalig
-// Filters/zoekterm worden hersteld vanuit globale state
-// ============================================================
+
 export function renderSelectiePage() {
-  const comp   = cC();
-  if (!comp) {
-    document.getElementById('page-selectie').innerHTML =
-      `<div class="alert ad">Kies eerst een competitie.</div>`;
-    return;
-  }
+  const comp   = window._activeComp || 'normal';
   const s      = cSett(comp);
   const locked = isLocked(comp);
   const sel    = myTeam(comp).renner_ids;
   const left   = s.budget - budgetUsed(comp);
 
-  // Koers-pills
+  // Voortgang beide competities voor de switcher
+  const sn = cSett('normal'), sp = cSett('pro');
+  const selN = myTeam('normal').renner_ids, selP = myTeam('pro').renner_ids;
+
   const pills = state.koersen.map(k =>
     `<span class="pill-filter${window._activeKF === k.id ? ' active' : ''}"
       onclick="setKF('${k.id}')"
     >Doet mee aan ${k.naam}</span>`
   ).join('');
 
-  // Ploegen dropdown — gefilterd op actieve koers
   const ploegOpts = _ploegOptions(window._filterFT);
 
   document.getElementById('page-selectie').innerHTML = `
+    <!-- Competitie switcher -->
+    <div class="g2" style="margin-bottom:.8rem">
+      <div class="cc${comp === 'normal' ? ' ac' : ''}" onclick="switchComp('normal')" style="padding:.7rem">
+        <div style="font-size:10px;font-weight:500;padding:1px 7px;border-radius:var(--radius);background:var(--green-light);color:var(--green-dark);display:inline-block;margin-bottom:4px">NORMAAL</div>
+        <div style="font-size:12px;font-weight:500">${myTeam('normal').ploeg_naam || 'Normaal'}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">
+          ${selN.length}/${sn.max_renners} renners
+          ${selN.length === sn.max_renners ? ' <span class="badge bg" style="font-size:10px">✓</span>' : ''}
+        </div>
+      </div>
+      <div class="cc${comp === 'pro' ? ' ac' : ''}" onclick="switchComp('pro')" style="padding:.7rem">
+        <div style="font-size:10px;font-weight:500;padding:1px 7px;border-radius:var(--radius);background:var(--amber-light);color:var(--amber-text);display:inline-block;margin-bottom:4px">PRO</div>
+        <div style="font-size:12px;font-weight:500">${myTeam('pro').ploeg_naam || 'Pro'}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">
+          ${selP.length}/${sp.max_renners} renners
+          ${selP.length === sp.max_renners ? ' <span class="badge bg" style="font-size:10px">✓</span>' : ''}
+        </div>
+      </div>
+    </div>
+
     ${locked
       ? `<div class="locked-banner">🔒 Deadline (${fmtDL(s.deadline)}) verstreken — ploeg kan niet meer gewijzigd worden.</div>`
       : ''}
     ${isComplete(comp)
       ? `<div class="complete-banner">
-           <span>✔ Ploeg compleet!</span>
+           <span>✔ ${comp === 'normal' ? 'Normaal' : 'Pro'} ploeg compleet!</span>
            <button class="btn btn-sm"
              style="background:rgba(255,255,255,.2);color:#fff;border-color:rgba(255,255,255,.4)"
              onclick="goPage('mijnploeg')">Bekijk</button>
@@ -244,20 +270,16 @@ export function renderSelectiePage() {
         <div class="card-title" style="margin-bottom:0">Renners</div>
         <span class="badge" id="badge-cnt">0</span>
       </div>
-
-      <!-- Koers pills -->
       <div style="margin-bottom:8px;display:flex;flex-wrap:wrap">
         <span class="pill-filter${window._activeKF === null ? ' active' : ''}"
           onclick="setKF(null)">Alle</span>
         ${pills}
       </div>
-
-      <!-- Zoek + filters -->
       <input type="text" id="search" placeholder="Zoek renner of ploeg..."
         value="${window._filterQ}"
         oninput="onSearchInput(this.value)"
         style="margin-bottom:8px"/>
-      <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+      <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
         <select id="ft" style="width:auto;margin-bottom:0" onchange="onFilterTeam(this.value)">
           <option value="">Alle ploegen</option>${ploegOpts}
         </select>
@@ -276,13 +298,13 @@ export function renderSelectiePage() {
           ${window._filterMaxK ? `<button onclick="onFilterMaxK('')" style="background:none;border:none;cursor:pointer;font-size:14px;color:var(--text2);padding:0 2px" title="Wis filter">✕</button>` : ''}
         </div>
       </div>
-
       <div id="ab" style="display:none"></div>
       <div id="rl"></div>
     </div>`;
 
   renderRennerList();
 }
+
 
 // Hulpfunctie: bouw <option> tags voor ploegen, gefilterd op actieve koers
 function _ploegOptions(geselecteerde) {
@@ -449,7 +471,7 @@ function _updateMetrics(comp, s, sel, left) {
 // MIJN PLOEG
 // ============================================================
 export function renderMijnPloeg() {
-  const comp   = cC() || 'normal';
+  const comp   = window._activeComp || 'normal';
   const s      = cSett(comp);
   const locked = isLocked(comp);
   const team   = myTeam(comp);
@@ -457,10 +479,12 @@ export function renderMijnPloeg() {
   const used   = budgetUsed(comp);
   const pct    = Math.min(100, Math.round(used / s.budget * 100));
 
-  const rennerNamen = sel
-    .map(id => state.renners.find(r => r.id === id)?.naam)
-    .filter(Boolean);
-  const totalPts = calcUserPtsFromRijen(state.allUitslag_rijen, rennerNamen);
+  const rennerNamen = sel.map(id => state.renners.find(r => r.id === id)?.naam).filter(Boolean);
+  const totalPts    = calcUserPtsFromRijen(state.allUitslag_rijen, rennerNamen);
+
+  // Voortgang beide competities voor switcher
+  const sn = cSett('normal'), sp = cSett('pro');
+  const selN = myTeam('normal').renner_ids, selP = myTeam('pro').renner_ids;
 
   let slots = '';
   for (let i = 0; i < s.max_renners; i++) {
@@ -501,13 +525,31 @@ export function renderMijnPloeg() {
   ).join('') || '<div style="font-size:12px;color:var(--text2)">Nog geen renners</div>';
 
   document.getElementById('page-mijnploeg').innerHTML = `
-    ${locked
-      ? `<div class="locked-banner">🔒 Deadline (${fmtDL(s.deadline)}) verstreken — ploeg kan niet meer gewijzigd worden.</div>`
-      : ''}
+    <!-- Competitie switcher -->
+    <div class="g2" style="margin-bottom:.8rem">
+      <div class="cc${comp === 'normal' ? ' ac' : ''}" onclick="switchComp('normal')" style="padding:.7rem">
+        <div style="font-size:10px;font-weight:500;padding:1px 7px;border-radius:var(--radius);background:var(--green-light);color:var(--green-dark);display:inline-block;margin-bottom:4px">NORMAAL</div>
+        <div style="font-size:12px;font-weight:500">${myTeam('normal').ploeg_naam || 'Normaal'}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">
+          ${selN.length}/${sn.max_renners} renners
+          ${selN.length === sn.max_renners ? ' <span class="badge bg" style="font-size:10px">✓</span>' : ''}
+        </div>
+      </div>
+      <div class="cc${comp === 'pro' ? ' ac' : ''}" onclick="switchComp('pro')" style="padding:.7rem">
+        <div style="font-size:10px;font-weight:500;padding:1px 7px;border-radius:var(--radius);background:var(--amber-light);color:var(--amber-text);display:inline-block;margin-bottom:4px">PRO</div>
+        <div style="font-size:12px;font-weight:500">${myTeam('pro').ploeg_naam || 'Pro'}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">
+          ${selP.length}/${sp.max_renners} renners
+          ${selP.length === sp.max_renners ? ' <span class="badge bg" style="font-size:10px">✓</span>' : ''}
+        </div>
+      </div>
+    </div>
+
+    ${locked ? `<div class="locked-banner">🔒 Deadline (${fmtDL(s.deadline)}) verstreken.</div>` : ''}
     <div class="card">
       <div class="sh">
         <div>
-          <div class="card-title" style="margin-bottom:1px">${team.ploeg_naam || 'Mijn ploeg'}</div>
+          <div class="card-title" style="margin-bottom:1px">${team.ploeg_naam || (comp === 'normal' ? 'Normaal ploeg' : 'Pro ploeg')}</div>
           <div style="font-size:11px;color:var(--text2)">${comp === 'pro' ? 'Pro' : 'Normaal'}</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px">
@@ -529,6 +571,7 @@ export function renderMijnPloeg() {
       ${breakdown}
     </div>`;
 }
+
 
 // ============================================================
 // KLASSEMENT
