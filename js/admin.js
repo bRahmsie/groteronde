@@ -335,6 +335,7 @@ window.deleteKoers = async function(id) {
   });
   // Verwijder ook alle uitslagrijen van deze koers uit de cache
   getState().allUitslag_rijen = getState().allUitslag_rijen.filter(r => r.koers_id !== id);
+  getState().uitslagen = (getState().uitslagen || []).filter(u => u.koers_id !== id);
   renderKoersenTab();
 };
 
@@ -573,10 +574,20 @@ window.processSheets = async function() {
   document.getElementById('prog-pct').textContent  = '100%';
   document.getElementById('prog-lbl').textContent  = 'Klaar!';
 
+  // Herlaad uitslagen metadata + rijen na import
+  const { data: uitslagenMeta } = await sb.from('uitslagen').select('id, koers_id, sheet_naam, type');
+  getState().uitslagen = uitslagenMeta || [];
+
   const { data: rijen } = await sb.from('uitslag_rijen').select('*, uitslagen(type, koers_id)');
-  getState().allUitslag_rijen = (rijen || []).map(r => ({
-    ...r, type: r.uitslagen?.type || 'rit', koers_id: r.uitslagen?.koers_id,
-  }));
+  getState().allUitslag_rijen = (rijen || []).map(r => {
+    const u = (getState().uitslagen || []).find(x => x.id === r.uitslag_id);
+    return {
+      ...r,
+      type:       u?.type      || r.uitslagen?.type || 'rit',
+      koers_id:   u?.koers_id  || r.uitslagen?.koers_id,
+      sheet_naam: u?.sheet_naam || '',
+    };
+  });
 
   const top = results.map(({ sn, rijen }) => {
     const top3 = rijen.filter(r => r.totaal > 0).sort((a, b) => b.totaal - a.totaal).slice(0, 3);
@@ -615,6 +626,7 @@ window.deleteUitslag = async function(id) {
   await sb.from('uitslagen').delete().eq('id', id);
   // Verwijder ook uit in-memory cache zodat punten meteen verdwijnen
   getState().allUitslag_rijen = getState().allUitslag_rijen.filter(r => r.uitslag_id !== id);
+  getState().uitslagen = (getState().uitslagen || []).filter(u => u.id !== id);
   renderUitslagenTab();
 };
 
@@ -622,6 +634,7 @@ window.deleteAllUitslagen = async function() {
   await sb.from('uitslag_rijen').delete().neq('id', '00000000-0000-0000-0000-000000000000');
   await sb.from('uitslagen').delete().neq('id', '00000000-0000-0000-0000-000000000000');
   getState().allUitslag_rijen = [];
+  getState().uitslagen = [];
   renderUitslagenTab();
 };
 
