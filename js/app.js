@@ -12,7 +12,6 @@ import {
   renderCompPage, renderSelectiePage, renderRennerList,
   renderMijnPloeg, renderKlassement,
 } from './pages.js';
-import { renderAdminPage, switchATab } from './admin.js';
 
 // ============================================================
 // AUTH
@@ -71,7 +70,13 @@ export function goPage(p) {
   if (p === 'selectie')   renderSelectiePage();
   if (p === 'mijnploeg')  renderMijnPloeg();
   if (p === 'klassement') renderKlassement();
-  if (p === 'admin')      renderAdminPage();
+  if (p === 'admin') {
+    import('./admin.js').then(m => m.renderAdminPage()).catch(e => {
+      console.error('Admin module laadfout:', e);
+      document.getElementById('page-admin').innerHTML =
+        '<div style="padding:1rem"><div class="alert ad">Admin module kon niet geladen worden: ' + e.message + '</div></div>';
+    });
+  }
 }
 window.goPage = goPage;
 
