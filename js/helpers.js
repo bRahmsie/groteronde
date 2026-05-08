@@ -65,7 +65,7 @@ export function dagPts(pos) {
 
 // Naam normaliseren voor fuzzy matching (accenten + hoofdletters)
 export function normNaam(n) {
-  return (n || '').toLowerCase().trim()
+  return (n || '').replace(/\u00a0/g, ' ').toLowerCase().trim()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
@@ -140,7 +140,7 @@ export function parseSheet(sheetName, koersNaam, data) {
   for (let i = hIdx + 1; i < data.length; i++) {
     const row = data[i];
     if (!row || row.every(c => c === null || c === '')) continue;
-    const naam = String(row[ci.rider] ?? '').trim();
+    const naam = String(row[ci.rider] ?? '').replace(/\u00a0/g, ' ').trim();
     const team = String(row[ci.team] ?? '').trim();
     if (!naam) continue;
     const rnkRaw = String(row[ci.rnk] ?? '').trim().toUpperCase();
