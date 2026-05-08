@@ -137,7 +137,7 @@ sb.auth.onAuthStateChange((event, session) => {
 // ============================================================
 window.goPage = function(p) {
   ['competitie','selectie','mijnploeg','klassement','ploegen','admin'].forEach(x => {
-    document.getElementById('page-'+x).classList.toggle('active', x === p);
+    const pg = document.getElementById('page-'+x); if (pg) pg.classList.toggle('active', x === p);
     const t = document.getElementById('nav-'+x);
     if (t) t.classList.toggle('active', x === p);
   });
