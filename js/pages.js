@@ -747,3 +747,106 @@ window.toggleKlDetail = function(id) {
   if (!el) return;
   el.style.display = el.style.display === 'none' ? 'table-row' : 'none';
 };
+
+// ============================================================
+// PLOEGEN PAGINA — alle deelnemers met hun volledige selectie
+// ============================================================
+export async function renderPloegen() {
+  document.getElementById('page-ploegen').innerHTML =
+    '<div style="padding:1rem"><div class="alert ai">Ploegen laden...</div></div>';
+
+  const comp = window._activePloegComp || 'normal';
+
+  const { data: teams } = await sb
+    .from('user_teams')
+    .select('*, profiles(naam), user_team_renners(renner_id, renners(naam, ploeg, kostprijs))')
+    .eq('competitie', comp)
+    .order('ploeg_naam');
+
+  const s = state.settings[comp] || {};
+
+  const compSwitcher = `
+    <div class="g2" style="margin-bottom:.9rem">
+      <div class="cc${comp==='normal'?' ac':''}" onclick="switchPloegComp('normal')" style="padding:.6rem;cursor:pointer">
+        <div style="font-size:10px;font-weight:500;padding:1px 7px;border-radius:var(--radius);background:var(--green-light);color:var(--green-dark);display:inline-block">NORMAAL</div>
+        <div style="font-size:12px;margin-top:4px;color:var(--text2)">${(teams||[]).length} ploegen</div>
+      </div>
+      <div class="cc${comp==='pro'?' ac':''}" onclick="switchPloegComp('pro')" style="padding:.6rem;cursor:pointer">
+        <div style="font-size:10px;font-weight:500;padding:1px 7px;border-radius:var(--radius);background:var(--amber-light);color:var(--amber-text);display:inline-block">PRO</div>
+        <div style="font-size:12px;margin-top:4px;color:var(--text2)">ploegen bekijken</div>
+      </div>
+    </div>`;
+
+  if (!teams?.length) {
+    document.getElementById('page-ploegen').innerHTML = `
+      <div style="padding:1rem">
+        ${compSwitcher}
+        <div class="card"><div style="font-size:13px;color:var(--text2)">Geen ploegen gevonden voor ${comp==='normal'?'Normaal':'Pro'}.</div></div>
+      </div>`;
+    return;
+  }
+
+  const cards = teams.map(t => {
+    const renners = (t.user_team_renners || [])
+      .map(utr => utr.renners)
+      .filter(Boolean)
+      .sort((a, b) => a.naam.localeCompare(b.naam));
+
+    const compleet = renners.length === s.max_renners;
+    const kostprijsTotal = renners.reduce((sum, r) => sum + (r.kostprijs || 0), 0);
+
+    // Groepeer per wielerploeg
+    const ploegGroepen = {};
+    renners.forEach(r => {
+      if (!ploegGroepen[r.ploeg]) ploegGroepen[r.ploeg] = [];
+      ploegGroepen[r.ploeg].push(r);
+    });
+
+    const rennerRijen = renners.map(r =>
+      `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--border)">
+        ${jersey(r.ploeg, 18)}
+        <span style="font-size:12px;flex:1">${r.naam}</span>
+        <span style="font-size:11px;color:var(--text2)">${r.ploeg}</span>
+        <span style="font-size:11px;color:var(--text2);min-width:28px;text-align:right">${r.kostprijs}</span>
+      </div>`
+    ).join('');
+
+    const detailId = `ploeg-detail-${t.id}`;
+
+    return `<div class="card" style="margin-bottom:.7rem">
+      <div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="togglePloegDetail('${detailId}')">
+        <div style="flex:1">
+          <div style="font-size:14px;font-weight:500">${t.ploeg_naam || t.profiles?.naam || '—'}</div>
+          <div style="font-size:11px;color:var(--text2)">${t.profiles?.naam || ''}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <span class="badge ${compleet?'bg':'by'}">${renners.length}/${s.max_renners} ${compleet?'✓':''}</span>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px">${kostprijsTotal} kostprijs</div>
+        </div>
+        <span style="font-size:14px;color:var(--text2);margin-left:4px">▾</span>
+      </div>
+      <div id="${detailId}" style="display:none;margin-top:.7rem">
+        ${renners.length === 0
+          ? '<div style="font-size:12px;color:var(--text2)">Nog geen renners geselecteerd.</div>'
+          : rennerRijen}
+      </div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('page-ploegen').innerHTML = `
+    <div style="padding:1rem">
+      ${compSwitcher}
+      ${cards}
+    </div>`;
+}
+
+window.switchPloegComp = function(comp) {
+  window._activePloegComp = comp;
+  renderPloegen();
+};
+
+window.togglePloegDetail = function(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+};
