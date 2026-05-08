@@ -3,7 +3,7 @@ import { loading, showAlert } from './helpers.js';
 import {
   state, loadAllData,
   renderCompPage, renderSelectiePage, renderRennerList,
-  renderMijnPloeg, renderKlassement,
+  renderMijnPloeg, renderKlassement, renderPloegen,
 } from './pages.js';
 
 // XLSX via CDN — geladen na imports
@@ -136,7 +136,7 @@ sb.auth.onAuthStateChange((event, session) => {
 // NAVIGATIE
 // ============================================================
 window.goPage = function(p) {
-  ['competitie','selectie','mijnploeg','klassement','admin'].forEach(x => {
+  ['competitie','selectie','mijnploeg','klassement','ploegen','admin'].forEach(x => {
     document.getElementById('page-'+x).classList.toggle('active', x === p);
     const t = document.getElementById('nav-'+x);
     if (t) t.classList.toggle('active', x === p);
@@ -145,6 +145,7 @@ window.goPage = function(p) {
   if (p === 'selectie')   renderSelectiePage();
   if (p === 'mijnploeg')  renderMijnPloeg();
   if (p === 'klassement') renderKlassement();
+  if (p === 'ploegen')    renderPloegen();
   if (p === 'admin') {
     import('./admin.js')
       .then(m => m.renderAdminPage())
