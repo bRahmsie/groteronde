@@ -752,92 +752,137 @@ window.toggleKlDetail = function(id) {
 // PLOEGEN PAGINA — alle deelnemers met hun volledige selectie
 // ============================================================
 export async function renderPloegen() {
-  document.getElementById('page-ploegen').innerHTML =
-    '<div style="padding:1rem"><div class="alert ai">Ploegen laden...</div></div>';
+  const ploegenEl = document.getElementById('page-ploegen');
+  if (!ploegenEl) return;
+  ploegenEl.innerHTML = '<div style="padding:1rem"><div class="alert ai">Laden...</div></div>';
 
   const comp = window._activePloegComp || 'normal';
+  const view = window._activePloegView || 'ploegen';
 
   const { data: teams } = await sb
     .from('user_teams')
     .select('*, profiles(naam), user_team_renners(renner_id, renners(naam, ploeg, kostprijs))')
-    .eq('competitie', comp)
     .order('ploeg_naam');
 
-  const s = state.settings[comp] || {};
+  const sNorm = state.settings['normal'] || {};
+  const sPro  = state.settings['pro']    || {};
+  const teamsNorm = (teams || []).filter(t => t.competitie === 'normal');
+  const teamsPro  = (teams || []).filter(t => t.competitie === 'pro');
+  const actTeams  = comp === 'normal' ? teamsNorm : teamsPro;
+  const s         = comp === 'normal' ? sNorm : sPro;
 
-  const compSwitcher = `
-    <div class="g2" style="margin-bottom:.9rem">
-      <div class="cc${comp==='normal'?' ac':''}" onclick="switchPloegComp('normal')" style="padding:.6rem;cursor:pointer">
-        <div style="font-size:10px;font-weight:500;padding:1px 7px;border-radius:var(--radius);background:var(--green-light);color:var(--green-dark);display:inline-block">NORMAAL</div>
-        <div style="font-size:12px;margin-top:4px;color:var(--text2)">${(teams||[]).length} ploegen</div>
-      </div>
-      <div class="cc${comp==='pro'?' ac':''}" onclick="switchPloegComp('pro')" style="padding:.6rem;cursor:pointer">
-        <div style="font-size:10px;font-weight:500;padding:1px 7px;border-radius:var(--radius);background:var(--amber-light);color:var(--amber-text);display:inline-block">PRO</div>
-        <div style="font-size:12px;margin-top:4px;color:var(--text2)">ploegen bekijken</div>
-      </div>
-    </div>`;
+  const compSwitcher =
+    '<div class="g2" style="margin-bottom:.9rem">' +
+    '<div class="cc' + (comp==='normal'?' ac':'') + '" onclick="switchPloegComp(\'normal\')" style="padding:.6rem;cursor:pointer">' +
+    '<div style="font-size:10px;font-weight:500;padding:1px 7px;border-radius:var(--radius);background:var(--green-light);color:var(--green-dark);display:inline-block">NORMAAL</div>' +
+    '<div style="font-size:12px;margin-top:4px;color:var(--text2)">' + teamsNorm.length + ' ploegen</div></div>' +
+    '<div class="cc' + (comp==='pro'?' ac':'') + '" onclick="switchPloegComp(\'pro\')" style="padding:.6rem;cursor:pointer">' +
+    '<div style="font-size:10px;font-weight:500;padding:1px 7px;border-radius:var(--radius);background:var(--amber-light);color:var(--amber-text);display:inline-block">PRO</div>' +
+    '<div style="font-size:12px;margin-top:4px;color:var(--text2)">' + teamsPro.length + ' ploegen</div></div></div>';
 
-  if (!teams?.length) {
-    document.getElementById('page-ploegen').innerHTML = `
-      <div style="padding:1rem">
-        ${compSwitcher}
-        <div class="card"><div style="font-size:13px;color:var(--text2)">Geen ploegen gevonden voor ${comp==='normal'?'Normaal':'Pro'}.</div></div>
-      </div>`;
-    return;
-  }
+  const viewTabs =
+    '<div style="display:flex;gap:3px;background:var(--bg3);border-radius:var(--radius);padding:3px;margin-bottom:.9rem">' +
+    '<div style="flex:1;text-align:center;padding:5px;font-size:13px;border-radius:6px;cursor:pointer;' +
+    (view==='ploegen' ? 'background:var(--bg2);font-weight:500' : 'color:var(--text2)') +
+    '" onclick="switchPloegView(\'ploegen\')">&#x1F465; Per ploeg</div>' +
+    '<div style="flex:1;text-align:center;padding:5px;font-size:13px;border-radius:6px;cursor:pointer;' +
+    (view==='renners' ? 'background:var(--bg2);font-weight:500' : 'color:var(--text2)') +
+    '" onclick="switchPloegView(\'renners\')">&#x1F6B4; Per renner</div></div>';
 
-  const cards = teams.map(t => {
-    const renners = (t.user_team_renners || [])
-      .map(utr => utr.renners)
-      .filter(Boolean)
-      .sort((a, b) => a.naam.localeCompare(b.naam));
+  let content = '';
 
-    const compleet = renners.length === s.max_renners;
-    const kostprijsTotal = renners.reduce((sum, r) => sum + (r.kostprijs || 0), 0);
+  if (view === 'ploegen') {
+    if (!actTeams.length) {
+      content = '<div class="card"><div style="font-size:13px;color:var(--text2)">Geen ploegen gevonden.</div></div>';
+    } else {
+      content = actTeams.map(t => {
+        const renners = (t.user_team_renners || [])
+          .map(utr => utr.renners).filter(Boolean)
+          .sort((a, b) => a.naam.localeCompare(b.naam));
+        const compleet = renners.length === s.max_renners;
+        const kostprijsTotal = renners.reduce((sum, r) => sum + (r.kostprijs || 0), 0);
+        const detailId = 'ploeg-detail-' + t.id;
+        const rennerRijen = renners.map(r =>
+          '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--border)">' +
+          jersey(r.ploeg, 18) +
+          '<span style="font-size:12px;flex:1">' + r.naam + '</span>' +
+          '<span style="font-size:11px;color:var(--text2)">' + r.ploeg + '</span>' +
+          '<span style="font-size:11px;color:var(--text2);min-width:28px;text-align:right">' + r.kostprijs + '</span>' +
+          '</div>'
+        ).join('');
+        return '<div class="card" style="margin-bottom:.7rem">' +
+          '<div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="togglePloegDetail(\'' + detailId + '\')">' +
+          '<div style="flex:1">' +
+          '<div style="font-size:14px;font-weight:500">' + (t.ploeg_naam || t.profiles?.naam || '—') + '</div>' +
+          '<div style="font-size:11px;color:var(--text2)">' + (t.profiles?.naam || '') + '</div>' +
+          '</div>' +
+          '<div style="text-align:right;flex-shrink:0">' +
+          '<span class="badge ' + (compleet ? 'bg' : 'by') + '">' + renners.length + '/' + s.max_renners + (compleet ? ' \u2713' : '') + '</span>' +
+          '<div style="font-size:11px;color:var(--text2);margin-top:2px">' + kostprijsTotal + ' kostprijs</div>' +
+          '</div>' +
+          '<span style="font-size:14px;color:var(--text2);margin-left:4px">\u25BE</span>' +
+          '</div>' +
+          '<div id="' + detailId + '" style="display:none;margin-top:.7rem">' +
+          (renners.length === 0 ? '<div style="font-size:12px;color:var(--text2)">Nog geen renners.</div>' : rennerRijen) +
+          '</div></div>';
+      }).join('');
+    }
 
-    // Groepeer per wielerploeg
-    const ploegGroepen = {};
-    renners.forEach(r => {
-      if (!ploegGroepen[r.ploeg]) ploegGroepen[r.ploeg] = [];
-      ploegGroepen[r.ploeg].push(r);
+  } else {
+    // PER RENNER — alle teams, beide competities
+    const rennerKiezers = {};
+    (teams || []).forEach(t => {
+      const deelnemer = t.profiles?.naam || '—';
+      const compLabel = t.competitie === 'normal' ? 'Normaal' : 'Pro';
+      (t.user_team_renners || []).forEach(utr => {
+        const naam = utr.renners?.naam;
+        const ploeg = utr.renners?.ploeg;
+        if (!naam) return;
+        if (!rennerKiezers[naam]) rennerKiezers[naam] = { ploeg, kiezers: [] };
+        rennerKiezers[naam].kiezers.push({ deelnemer, comp: compLabel });
+      });
     });
 
-    const rennerRijen = renners.map(r =>
-      `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--border)">
-        ${jersey(r.ploeg, 18)}
-        <span style="font-size:12px;flex:1">${r.naam}</span>
-        <span style="font-size:11px;color:var(--text2)">${r.ploeg}</span>
-        <span style="font-size:11px;color:var(--text2);min-width:28px;text-align:right">${r.kostprijs}</span>
-      </div>`
-    ).join('');
+    const gesorteerd = Object.entries(rennerKiezers)
+      .sort((a, b) => b[1].kiezers.length - a[1].kiezers.length || a[0].localeCompare(b[0]));
 
-    const detailId = `ploeg-detail-${t.id}`;
+    if (!gesorteerd.length) {
+      content = '<div class="card"><div style="font-size:13px;color:var(--text2)">Nog geen renners geselecteerd.</div></div>';
+    } else {
+      const zoekBalk = '<div class="card" style="margin-bottom:.7rem;padding:.7rem">' +
+        '<input type="text" id="renner-zoek" placeholder="Zoek renner..." ' +
+        'oninput="filterRennerOverzicht(this.value)" style="margin-bottom:0"/></div>';
 
-    return `<div class="card" style="margin-bottom:.7rem">
-      <div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="togglePloegDetail('${detailId}')">
-        <div style="flex:1">
-          <div style="font-size:14px;font-weight:500">${t.ploeg_naam || t.profiles?.naam || '—'}</div>
-          <div style="font-size:11px;color:var(--text2)">${t.profiles?.naam || ''}</div>
-        </div>
-        <div style="text-align:right;flex-shrink:0">
-          <span class="badge ${compleet?'bg':'by'}">${renners.length}/${s.max_renners} ${compleet?'✓':''}</span>
-          <div style="font-size:11px;color:var(--text2);margin-top:2px">${kostprijsTotal} kostprijs</div>
-        </div>
-        <span style="font-size:14px;color:var(--text2);margin-left:4px">▾</span>
-      </div>
-      <div id="${detailId}" style="display:none;margin-top:.7rem">
-        ${renners.length === 0
-          ? '<div style="font-size:12px;color:var(--text2)">Nog geen renners geselecteerd.</div>'
-          : rennerRijen}
-      </div>
-    </div>`;
-  }).join('');
+      const rijen = gesorteerd.map(([naam, data]) => {
+        const detailId = 'renner-detail-' + naam.replace(/[^a-z0-9]/gi, '_');
+        const kiezersHtml = data.kiezers.map(k =>
+          '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:0.5px solid var(--border)">' +
+          '<span style="font-size:12px;flex:1">' + k.deelnemer + '</span>' +
+          '<span class="badge ' + (k.comp === 'Normaal' ? 'bg' : 'by') + '" style="font-size:10px">' + k.comp + '</span>' +
+          '</div>'
+        ).join('');
+        return '<div class="renner-overzicht-item" data-naam="' + naam.toLowerCase() + '" style="margin-bottom:.5rem">' +
+          '<div class="card" style="padding:.7rem">' +
+          '<div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="togglePloegDetail(\'' + detailId + '\')">' +
+          jersey(data.ploeg, 20) +
+          '<div style="flex:1;min-width:0">' +
+          '<div style="font-size:13px;font-weight:500">' + naam + '</div>' +
+          '<div style="font-size:11px;color:var(--text2)">' + (data.ploeg || '') + '</div>' +
+          '</div>' +
+          '<span class="badge" style="margin-right:4px">' + data.kiezers.length + '\xD7</span>' +
+          '<span style="font-size:13px;color:var(--text2)">\u25BE</span>' +
+          '</div>' +
+          '<div id="' + detailId + '" style="display:none;margin-top:.6rem">' +
+          '<div style="font-size:11px;font-weight:500;color:var(--text2);margin-bottom:4px">' +
+          'Gekozen door ' + data.kiezers.length + ' deelnemer' + (data.kiezers.length !== 1 ? 's' : '') + ':</div>' +
+          kiezersHtml + '</div></div></div>';
+      }).join('');
 
-  document.getElementById('page-ploegen').innerHTML = `
-    <div style="padding:1rem">
-      ${compSwitcher}
-      ${cards}
-    </div>`;
+      content = zoekBalk + '<div id="renner-overzicht-lijst">' + rijen + '</div>';
+    }
+  }
+
+  ploegenEl.innerHTML = '<div style="padding:1rem">' + compSwitcher + viewTabs + content + '</div>';
 }
 
 window.switchPloegComp = function(comp) {
@@ -845,8 +890,20 @@ window.switchPloegComp = function(comp) {
   renderPloegen();
 };
 
+window.switchPloegView = function(view) {
+  window._activePloegView = view;
+  renderPloegen();
+};
+
 window.togglePloegDetail = function(id) {
   const el = document.getElementById(id);
   if (!el) return;
   el.style.display = el.style.display === 'none' ? 'block' : 'none';
+};
+
+window.filterRennerOverzicht = function(zoek) {
+  const term = zoek.toLowerCase().trim();
+  document.querySelectorAll('.renner-overzicht-item').forEach(el => {
+    el.style.display = (!term || (el.dataset.naam || '').includes(term)) ? 'block' : 'none';
+  });
 };
