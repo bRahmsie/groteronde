@@ -879,8 +879,13 @@ const rennerRijen = renners.map(r => {
           '<div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="togglePloegDetail(\'' + detailId + '\')">' +
           jersey(data.ploeg, 20) +
           '<div style="flex:1;min-width:0">' +
-          '<div style="font-size:13px;font-weight:500">' + naam + '</div>' +
-          '<div style="font-size:11px;color:var(--text2)">' + (data.ploeg || '') + '</div>' +
+'<div style="font-size:13px;font-weight:500">' + naam +
+(state.allUitslag_rijen.find(u => {
+  const norm = n => (n||'').replace(/\u00a0/g,' ').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  return norm(u.renner_naam) === norm(naam) && (u.rnk==='DNF'||u.rnk==='DNS');
+}) ? ' <span class="badge br" style="font-size:10px">DNF/DNS</span>' : '') +
+'</div>' +
+'<div style="font-size:11px;color:var(--text2)">' + (data.ploeg || '') + '</div>' +
           '</div>' +
           '<span class="badge" style="margin-right:4px">' + data.kiezers.length + '\xD7</span>' +
           '<span style="font-size:13px;color:var(--text2)">\u25BE</span>' +
