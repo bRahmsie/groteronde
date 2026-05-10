@@ -69,6 +69,13 @@ export function normNaam(n) {
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+// Vergelijkt twee namen ongeacht volgorde van woorden en hoofdletters
+// "SOLER Marc" === "Soler Marc" === "Marc Soler"
+export function namenMatch(a, b) {
+  const prep = n => normNaam(n).split(/\s+/).sort().join(' ');
+  return prep(a) === prep(b);
+}
+
 // Bereken totaalpunten voor een gebruiker over alle uitslagen
 // rijen: array van uitslag_rijen uit DB
 // rennerNamen: array van namen in de ploeg
@@ -80,12 +87,11 @@ export function calcUserPtsFromRijen(rijen, rennerNamen) {
     byUitslag[r.uitslag_id].rijen.push(r);
   });
 
-  const normedNamen = rennerNamen.map(normNaam);
-  let total = 0;
+let total = 0;
 
-  Object.values(byUitslag).forEach(({ type, rijen: uRijen }) => {
-    const ptsPerRenner = normedNamen.map(naam => {
-      const row = uRijen.find(r => normNaam(r.renner_naam) === naam);
+Object.values(byUitslag).forEach(({ type, rijen: uRijen }) => {
+  const ptsPerRenner = rennerNamen.map(naam => {
+    const row = uRijen.find(r => namenMatch(r.renner_naam, naam));
       return row ? (row.totaal || 0) : 0;
     });
     if (type === 'rit') {
@@ -100,9 +106,8 @@ export function calcUserPtsFromRijen(rijen, rennerNamen) {
 
 // Bereken punten voor één renner over alle uitslagen
 export function calcRennerPtsFromRijen(rijen, rennerNaam) {
-  const normed = normNaam(rennerNaam);
-  return rijen
-    .filter(r => normNaam(r.renner_naam) === normed)
+return rijen
+  .filter(r => namenMatch(r.renner_naam, rennerNaam))
     .reduce((s, r) => s + (r.totaal || 0), 0);
 }
 
