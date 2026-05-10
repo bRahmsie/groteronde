@@ -802,14 +802,27 @@ export async function renderPloegen() {
         const compleet = renners.length === s.max_renners;
         const kostprijsTotal = renners.reduce((sum, r) => sum + (r.kostprijs || 0), 0);
         const detailId = 'ploeg-detail-' + t.id;
-        const rennerRijen = renners.map(r =>
-          '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--border)">' +
-          jersey(r.ploeg, 18) +
-          '<span style="font-size:12px;flex:1">' + r.naam + '</span>' +
-          '<span style="font-size:11px;color:var(--text2)">' + r.ploeg + '</span>' +
-          '<span style="font-size:11px;color:var(--text2);min-width:28px;text-align:right">' + r.kostprijs + '</span>' +
-          '</div>'
-        ).join('');
+const rennerRijen = renners.map(r => {
+  // Check of renner DNF/DNS heeft in een uitslag
+  const norm = n => (n||'').replace(/\u00a0/g,' ').toLowerCase().trim()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  const uitslag = state.allUitslag_rijen.find(u =>
+    norm(u.renner_naam) === norm(r.naam) &&
+    (u.rnk === 'DNF' || u.rnk === 'DNS')
+  );
+  const bg = uitslag
+    ? 'background:var(--red-light);border-left:3px solid var(--red-text);'
+    : '';
+  const label = uitslag
+    ? '<span class="badge br" style="font-size:10px;margin-left:4px">' + uitslag.rnk + '</span>'
+    : '';
+  return '<div style="display:flex;align-items:center;gap:8px;padding:5px 4px;border-bottom:0.5px solid var(--border);' + bg + '">' +
+    jersey(r.ploeg, 18) +
+    '<span style="font-size:12px;flex:1">' + r.naam + label + '</span>' +
+    '<span style="font-size:11px;color:var(--text2)">' + r.ploeg + '</span>' +
+    '<span style="font-size:11px;color:var(--text2);min-width:28px;text-align:right">' + r.kostprijs + '</span>' +
+    '</div>';
+}).join('');
         return '<div class="card" style="margin-bottom:.7rem">' +
           '<div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="togglePloegDetail(\'' + detailId + '\')">' +
           '<div style="flex:1">' +
