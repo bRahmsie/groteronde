@@ -1,5 +1,5 @@
 import { sb } from './supabase.js';
-import { jersey, normNaam, calcUserPtsFromRijen, calcRennerPtsFromRijen, fmtDL, cDown, loading } from './helpers.js';
+import { jersey, normNaam, namenMatch, calcUserPtsFromRijen, calcRennerPtsFromRijen, fmtDL, cDown, loading } from './helpers.js';
 
 // ============================================================
 // STATE
@@ -804,12 +804,10 @@ export async function renderPloegen() {
         const detailId = 'ploeg-detail-' + t.id;
 const rennerRijen = renners.map(r => {
   // Check of renner DNF/DNS heeft in een uitslag
-  const norm = n => (n||'').replace(/\u00a0/g,' ').toLowerCase().trim()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-  const uitslag = state.allUitslag_rijen.find(u =>
-    norm(u.renner_naam) === norm(r.naam) &&
-    (u.rnk === 'DNF' || u.rnk === 'DNS')
-  );
+const uitslag = state.allUitslag_rijen.find(u =>
+  namenMatch(u.renner_naam, r.naam) &&
+  (u.rnk === 'DNF' || u.rnk === 'DNS')
+);
   const bg = uitslag
     ? 'background:var(--red-light);border-left:3px solid var(--red-text);'
     : '';
