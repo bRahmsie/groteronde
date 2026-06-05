@@ -4,6 +4,32 @@ import { jersey, parseSheet, fmtDL, cDown, loading, showAlert } from './helpers.
 const getState = () => window._appState;
 
 // ============================================================
+// PUNTENTABELLEN EINDKLASSEMENT
+// ============================================================
+const EIND_ALG_PTS = {
+  1:250,2:220,3:190,4:150,5:130,6:125,7:120,8:115,9:110,10:100,
+  11:90,12:80,13:70,14:60,15:50,16:40,17:30,18:25,19:20,20:15
+};
+function eindAlgPts(pos, uitgereden) {
+  const p = parseInt(pos); if (isNaN(p)) return 0;
+  if (EIND_ALG_PTS[p]) return EIND_ALG_PTS[p];
+  if (p <= 100) return 10;
+  if (uitgereden && p <= uitgereden) return 5;
+  return 0;
+}
+const EIND_NEVEN_PTS = {1:150,2:125,3:100,4:75,5:50};
+function eindNevenPts(pos, isJongeren) {
+  const p = parseInt(pos); if (isNaN(p)) return 0;
+  if (isJongeren && p > 3) return 0;
+  return EIND_NEVEN_PTS[p] || 0;
+}
+function dagKlasPts(pos) {
+  if (!pos && pos !== 0) return 0;
+  const p = parseInt(pos);
+  return {1:15,2:10,3:5}[p] || 0;
+}
+
+// ============================================================
 // ADMIN PAGINA HOOFDRENDER
 // ============================================================
 export function renderAdminPage() {
@@ -151,7 +177,7 @@ window.clearDeadline = async function(comp) {
 };
 
 // ============================================================
-// KOERSEN TAB — met deelnemers import per koers
+// KOERSEN TAB
 // ============================================================
 async function renderKoersenTab() {
   const list = getState().koersen.map(k => {
@@ -193,7 +219,6 @@ async function renderKoersenTab() {
     </div>`;
   }).join('');
 
-  // Totaal deelnemers over alle koersen
   const totaalDeelnemers = getState().koersen.reduce((s, k) =>
     s + getState().renners.filter(r => r.koers_ids?.includes(k.id)).length, 0);
 
@@ -202,8 +227,7 @@ async function renderKoersenTab() {
       <div class="sh">
         <div class="card-title" style="margin-bottom:0">Koersen &amp; deelnemers</div>
         ${getState().koersen.length > 0 ? `
-          <button class="btn btn-sm btn-danger"
-            onclick="clearAlleDeelnemers()">
+          <button class="btn btn-sm btn-danger" onclick="clearAlleDeelnemers()">
             Wis alle deelnemers (alle koersen)
           </button>` : ''}
       </div>
@@ -240,14 +264,8 @@ async function _verwerkDeelnemers(koersId, koersNaam, raw) {
   resEl.style.display = 'none';
   loading(true);
 
-  // Namen inlezen — eerste kolom vóór eventuele puntkomma
-  const namen = raw.split('\n')
-    .map(l => l.split(';')[0].trim())
-    .filter(l => l.length > 0);
-
-  // Normaliseer voor matching
-  const norm = n => (n || '').toLowerCase().trim()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const namen = raw.split('\n').map(l => l.split(';')[0].trim()).filter(l => l.length > 0);
+  const norm = n => (n || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
   let matched = 0;
   const notFound  = [];
@@ -259,9 +277,7 @@ async function _verwerkDeelnemers(koersId, koersNaam, raw) {
     else notFound.push(naam);
   });
 
-  // Vervang alle bestaande koppelingen voor deze koers
   await sb.from('renner_koersen').delete().eq('koers_id', koersId);
-  // Batch insert van max 500 per keer om Supabase payload-limiet te vermijden
   if (rennerIds.length) {
     const rows = rennerIds.map(rid => ({ renner_id: rid, koers_id: koersId }));
     for (let i = 0; i < rows.length; i += 500) {
@@ -269,7 +285,6 @@ async function _verwerkDeelnemers(koersId, koersNaam, raw) {
     }
   }
 
-  // Update lokale state
   getState().renners.forEach(r => {
     r.koers_ids = (r.koers_ids || []).filter(k => k !== koersId);
     if (rennerIds.includes(r.id)) r.koers_ids.push(koersId);
@@ -285,8 +300,6 @@ async function _verwerkDeelnemers(koersId, koersNaam, raw) {
   resEl.className = `alert ${notFound.length && !matched ? 'ad' : 'as'}`;
   resEl.innerHTML = msg;
   resEl.style.display = 'block';
-
-  // Deelnemerstelling bijwerken
   renderKoersenTab();
 }
 
@@ -333,14 +346,13 @@ window.deleteKoers = async function(id) {
   getState().renners.forEach(r => {
     if (r.koers_ids) r.koers_ids = r.koers_ids.filter(k => k !== id);
   });
-  // Verwijder ook alle uitslagrijen van deze koers uit de cache
   getState().allUitslag_rijen = getState().allUitslag_rijen.filter(r => r.koers_id !== id);
   getState().uitslagen = (getState().uitslagen || []).filter(u => u.koers_id !== id);
   renderKoersenTab();
 };
 
 // ============================================================
-// RENNERS TAB — kostprijs aanpassen, koersen read-only
+// RENNERS TAB
 // ============================================================
 async function renderRennersTab() {
   const html = getState().renners.map(r => {
@@ -393,13 +405,10 @@ window.updateKostprijs = async function(id, val) {
 
 window.deleteAlleRenners = async function() {
   const n = getState().renners.length;
-  if (!confirm(`Alle ${n} renners verwijderen uit de database?\nDit verwijdert ook alle koers-koppelingen en gebruikersselecties.`)) return;
+  if (!confirm(`Alle ${n} renners verwijderen?\nDit verwijdert ook alle koers-koppelingen en gebruikersselecties.`)) return;
   loading(true);
-  // Koers-koppelingen eerst verwijderen (foreign key)
   await sb.from('renner_koersen').delete().neq('renner_id', '00000000-0000-0000-0000-000000000000');
-  // Gebruikersselecties verwijderen
   await sb.from('user_team_renners').delete().neq('renner_id', '00000000-0000-0000-0000-000000000000');
-  // Renners verwijderen
   await sb.from('renners').delete().neq('id', '00000000-0000-0000-0000-000000000000');
   getState().renners = [];
   loading(false);
@@ -407,9 +416,21 @@ window.deleteAlleRenners = async function() {
 };
 
 // ============================================================
-// UITSLAGEN TAB (Excel import)
+// UITSLAGEN TAB — met type-selectie voor eindklassement
 // ============================================================
 let xlWorkbook = null, xlSelSheets = new Set();
+
+const TYPE_LABELS = {
+  'rit': 'Rit',
+  'eind-algemeen': 'Eind Alg.',
+  'eind-punten': 'Eind Punten',
+  'eind-berg': 'Eind Berg',
+  'eind-jongeren': 'Eind Jongeren',
+  'dag-algemeen': 'Dag Alg.',
+  'dag-punten': 'Dag Punten',
+  'dag-berg': 'Dag Berg',
+  'dag-jongeren': 'Dag Jongeren',
+};
 
 async function renderUitslagenTab() {
   const { data: uitslagen } = await sb
@@ -422,6 +443,7 @@ async function renderUitslagenTab() {
     : uitslagen.map(u => `
         <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:0.5px solid var(--border)">
           <span class="badge bg">${u.koersen?.naam || '?'}</span>
+          <span class="badge bb" style="font-size:10px">${TYPE_LABELS[u.type] || u.type}</span>
           <span style="font-size:12px;font-weight:500">${u.sheet_naam}</span>
           <span style="font-size:11px;color:var(--text2);margin-left:auto">
             ${new Date(u.imported_at).toLocaleDateString('nl-BE')}
@@ -435,10 +457,38 @@ async function renderUitslagenTab() {
 
   document.getElementById('admin-content').innerHTML = `
     <div class="card">
-      <div class="card-title">📥 Excel-uitslag importeren</div>
-      <div class="alert ai" style="margin-bottom:.8rem">
-        Formaat per tabblad: <code>Rnk · Rider · Team · GC · Points · Berg · Jeugd</code>
+      <div class="card-title">📥 Uitslag importeren</div>
+      <div class="alert ai" style="margin-bottom:.8rem;font-size:12px">
+        <strong>Rit:</strong> kolommen <code>Rnk · Rider · Team · GC · Points · Berg · Jeugd</code><br>
+        <strong>Eindklassement / Dagklassement:</strong> kolommen <code>Rnk · Rider · Team</code>
       </div>
+
+      <div class="srow">
+        <div class="slbl">Koers</div>
+        <select id="imp-koers-sel" style="width:auto;margin-bottom:0;flex:1">
+          ${koersOpts || '<option value="">— Voeg eerst een koers toe —</option>'}
+        </select>
+      </div>
+      <div class="srow">
+        <div class="slbl">Type uitslag</div>
+        <select id="imp-type" style="width:auto;margin-bottom:0" onchange="toggleUitslagType()">
+          <option value="rit">Rituitslag</option>
+          <option value="eind-algemeen">Eindklassement — Algemeen</option>
+          <option value="eind-punten">Eindklassement — Punten</option>
+          <option value="eind-berg">Eindklassement — Berg</option>
+          <option value="eind-jongeren">Eindklassement — Jongeren</option>
+          <option value="dag-algemeen">Dagklassement — Algemeen</option>
+          <option value="dag-punten">Dagklassement — Punten</option>
+          <option value="dag-berg">Dagklassement — Berg</option>
+          <option value="dag-jongeren">Dagklassement — Jongeren</option>
+        </select>
+      </div>
+      <div class="srow" id="uitgereden-row" style="display:none">
+        <div class="slbl">Aantal uitgereden</div>
+        <input type="number" id="imp-uitgereden" value="150" min="1" style="width:80px;margin-bottom:0"/>
+        <span style="font-size:12px;color:var(--text2)">renners eindigden de koers (= 5 pts)</span>
+      </div>
+
       <div class="drop-zone" id="drop-zone"
         onclick="document.getElementById('xl-input').click()"
         ondragover="event.preventDefault();this.classList.add('dv')"
@@ -446,27 +496,23 @@ async function renderUitslagenTab() {
         ondrop="handleDrop(event)">
         <div style="font-size:1.6rem;margin-bottom:.3rem">📂</div>
         <div style="font-size:13px;font-weight:500">Klik of sleep Excel-bestand</div>
-        <div style="font-size:11px;color:var(--text2);margin-top:2px">.xlsx — één tabblad per rit</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">.xlsx bestand</div>
       </div>
       <input type="file" id="xl-input" accept=".xlsx" style="display:none" onchange="handleFile(this.files[0])"/>
     </div>
+
     <div class="card" id="sheets-card" style="display:none">
       <div class="sh">
-        <div class="card-title" style="margin-bottom:0">Kies ritten &amp; koers</div>
+        <div class="card-title" style="margin-bottom:0">Kies tabbladen</div>
         <div style="display:flex;gap:5px">
           <button class="btn btn-sm" onclick="selAllSheets(true)">Alles</button>
           <button class="btn btn-sm" onclick="selAllSheets(false)">Geen</button>
         </div>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:.8rem">
-        <span style="font-size:12px;color:var(--text2);flex-shrink:0">Koers:</span>
-        <select id="imp-koers-sel" style="width:auto;margin-bottom:0;flex:1">
-          ${koersOpts || '<option value="">— Voeg eerst een koers toe via het tabblad Koersen —</option>'}
-        </select>
-      </div>
       <div id="sheet-pills" style="margin-bottom:.8rem"></div>
-      <button class="btn btn-primary" onclick="processSheets()">▶ Verwerk geselecteerde ritten</button>
+      <button class="btn btn-primary" onclick="processSheets()">▶ Verwerk</button>
     </div>
+
     <div class="card" id="imp-prog-card" style="display:none">
       <div class="card-title">Verwerking</div>
       <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2)">
@@ -475,7 +521,9 @@ async function renderUitslagenTab() {
       <div class="prog-bar"><div class="prog-fill" id="prog-fill" style="width:0%"></div></div>
       <div id="prog-log" style="font-size:11px;color:var(--text2);max-height:100px;overflow-y:auto;line-height:1.8;margin-top:6px"></div>
     </div>
+
     <div id="imp-result-wrap" style="display:none"></div>
+
     <div class="card" style="margin-top:.8rem">
       <div class="sh">
         <div class="card-title" style="margin-bottom:0">Geïmporteerde uitslagen</div>
@@ -485,6 +533,12 @@ async function renderUitslagenTab() {
       <div id="ov-uitslagen">${ovHtml}</div>
     </div>`;
 }
+
+window.toggleUitslagType = function() {
+  const type = document.getElementById('imp-type')?.value;
+  const row  = document.getElementById('uitgereden-row');
+  if (row) row.style.display = type === 'eind-algemeen' ? 'flex' : 'none';
+};
 
 window.handleDrop = function(ev) {
   ev.preventDefault();
@@ -513,11 +567,106 @@ function renderSheetPills() {
 window.toggleSheet  = n => { if (xlSelSheets.has(n)) xlSelSheets.delete(n); else xlSelSheets.add(n); renderSheetPills(); };
 window.selAllSheets = v => { if (v) xlWorkbook.SheetNames.forEach(n => xlSelSheets.add(n)); else xlSelSheets.clear(); renderSheetPills(); };
 
+// ---- Punt-berekening per rij op basis van type ----
+function _berekenRijen(data, type, uitgereden) {
+  if (!data || data.length < 2) return [];
+
+  let hIdx = 0;
+  for (let i = 0; i < Math.min(5, data.length); i++) {
+    if (data[i]?.some(c => String(c||'').toLowerCase().includes('rider') ||
+                           String(c||'').toLowerCase().includes('naam'))) {
+      hIdx = i; break;
+    }
+  }
+  const hdr = data[hIdx].map(c => String(c||'').trim().toLowerCase());
+  const ci  = {};
+  hdr.forEach((h, i) => {
+    if (h==='rnk'||h==='rank'||h==='pos') ci.rnk    = i;
+    else if (h==='rider'||h==='naam')      ci.rider  = i;
+    else if (h==='team')                   ci.team   = i;
+    else if (h==='gc'||h==='algemeen')     ci.gc     = i;
+    else if (h==='points'||h==='punten')   ci.points = i;
+    else if (h==='berg'||h==='mountain')   ci.berg   = i;
+    else if (h==='jeugd'||h==='youth')     ci.jeugd  = i;
+  });
+
+  // Winnaar voor DNF-bonus (alleen bij rit)
+  let winTeam = null;
+  if (type === 'rit') {
+    for (let i = hIdx+1; i < data.length; i++) {
+      const row = data[i]; if (!row) continue;
+      if (String(row[ci.rnk]??'').trim() === '1') {
+        winTeam = String(row[ci.team]??'').trim(); break;
+      }
+    }
+  }
+
+  const RIT_PTS = {1:100,2:85,3:70,4:60,5:50,6:45,7:40,8:35,9:30,10:25,
+                   11:20,12:18,13:16,14:14,15:12};
+  function ritPts(p) {
+    const s = String(p||'').trim().toUpperCase();
+    if (s==='DNF'||s==='DNS'||s==='') return 0;
+    const n = parseInt(s); if (isNaN(n)) return 0;
+    if (RIT_PTS[n]) return RIT_PTS[n];
+    if (n<=20) return 10; if (n<=25) return 8; if (n<=50) return 6;
+    if (n<=75) return 4;  if (n<=100) return 3; return 1;
+  }
+
+  const rijen = [];
+  for (let i = hIdx+1; i < data.length; i++) {
+    const row = data[i];
+    if (!row || row.every(c => c===null||c==='')) continue;
+    const naam = String(row[ci.rider]??'').replace(/\u00a0/g,' ').trim();
+    const team = String(row[ci.team]??'').trim();
+    if (!naam) continue;
+    const rnkRaw = String(row[ci.rnk]??'').trim().toUpperCase();
+    const isDNF  = rnkRaw === 'DNF';
+    const isDNS  = rnkRaw === 'DNS';
+
+    let pts_rit=0, pts_gc=0, pts_points=0, pts_berg=0, pts_jeugd=0, pts_bonus=0;
+
+    if (type === 'rit') {
+      if (!isDNF && !isDNS) pts_rit = ritPts(rnkRaw);
+      if (isDNF && winTeam && team === winTeam) pts_bonus = 5;
+      pts_gc     = dagKlasPts(ci.gc     !== undefined ? row[ci.gc]     : null);
+      pts_points = dagKlasPts(ci.points !== undefined ? row[ci.points] : null);
+      pts_berg   = dagKlasPts(ci.berg   !== undefined ? row[ci.berg]   : null);
+      pts_jeugd  = dagKlasPts(ci.jeugd  !== undefined ? row[ci.jeugd]  : null);
+    } else if (type === 'eind-algemeen') {
+      pts_rit = eindAlgPts(rnkRaw, uitgereden);
+    } else if (type === 'eind-punten') {
+      pts_points = eindNevenPts(rnkRaw, false);
+    } else if (type === 'eind-berg') {
+      pts_berg = eindNevenPts(rnkRaw, false);
+    } else if (type === 'eind-jongeren') {
+      pts_jeugd = eindNevenPts(rnkRaw, true);
+    } else if (type === 'dag-algemeen') {
+      pts_gc = dagKlasPts(rnkRaw);
+    } else if (type === 'dag-punten') {
+      pts_points = dagKlasPts(rnkRaw);
+    } else if (type === 'dag-berg') {
+      pts_berg = dagKlasPts(rnkRaw);
+    } else if (type === 'dag-jongeren') {
+      pts_jeugd = dagKlasPts(rnkRaw);
+    }
+
+    const totaal = pts_rit + pts_gc + pts_points + pts_berg + pts_jeugd + pts_bonus;
+    rijen.push({
+      renner_naam: naam, team_naam: team, rnk: rnkRaw,
+      pts_rit, pts_gc, pts_points, pts_berg, pts_jeugd, pts_bonus, totaal
+    });
+  }
+  return rijen;
+}
+
 window.processSheets = async function() {
-  const koersId = document.getElementById('imp-koers-sel').value;
+  const koersId    = document.getElementById('imp-koers-sel').value;
+  const type       = document.getElementById('imp-type')?.value || 'rit';
+  const uitgereden = parseInt(document.getElementById('imp-uitgereden')?.value) || 150;
+
   if (!koersId) { alert('Kies eerst een koers.'); return; }
   const toProcess = xlWorkbook.SheetNames.filter(n => xlSelSheets.has(n));
-  if (!toProcess.length) { alert('Selecteer minstens één rit.'); return; }
+  if (!toProcess.length) { alert('Selecteer minstens één tabblad.'); return; }
 
   document.getElementById('imp-prog-card').style.display = 'block';
   document.getElementById('imp-result-wrap').style.display = 'none';
@@ -533,40 +682,34 @@ window.processSheets = async function() {
     document.getElementById('prog-pct').textContent  = pct + '%';
     document.getElementById('prog-lbl').textContent  = `Verwerken: ${sn}`;
 
-    const ws     = xlWorkbook.Sheets[sn];
-    const data   = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
-    const parsed = parseSheet(sn, koersNaam, data);
+    const ws   = xlWorkbook.Sheets[sn];
+    const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+    const rijen = _berekenRijen(data, type, uitgereden);
 
     const { data: uitslag, error: uErr } = await sb.from('uitslagen').upsert({
       koers_id:    koersId,
       sheet_naam:  sn,
-      type:        'rit',
-      rit_nummer:  parseInt(sn.replace(/\D/g, '')) || null,
+      type:        type,
+      rit_nummer:  type === 'rit' ? (parseInt(sn.replace(/\D/g, '')) || null) : null,
       imported_by: getState().profile.id,
     }, { onConflict: 'koers_id,sheet_naam' }).select().single();
 
     if (uErr) { log.innerHTML += `<div>✗ ${sn}: ${uErr.message}</div>`; continue; }
 
     await sb.from('uitslag_rijen').delete().eq('uitslag_id', uitslag.id);
-    const rows = parsed.rijen.map(r => ({
-      uitslag_id:  uitslag.id,
-      renner_naam: r.naam,
-      team_naam:   r.team,
-      rnk:         r.rnk,
-      pts_rit:     r.pts_rit,
-      pts_gc:      r.pts_gc,
-      pts_points:  r.pts_points,
-      pts_berg:    r.pts_berg,
-      pts_jeugd:   r.pts_jeugd,
-      pts_bonus:   r.pts_bonus,
-      totaal:      r.totaal,
-    }));
-    if (rows.length) await sb.from('uitslag_rijen').insert(rows);
+    if (rijen.length) {
+      // Batch insert van 500
+      for (let b = 0; b < rijen.length; b += 500) {
+        await sb.from('uitslag_rijen').insert(
+          rijen.slice(b, b + 500).map(r => ({ uitslag_id: uitslag.id, ...r }))
+        );
+      }
+    }
 
-    const scorers = parsed.rijen.filter(r => r.totaal > 0).length;
-    log.innerHTML += `<div>✓ ${sn}: ${parsed.rijen.length} renners · ${scorers} scoren</div>`;
+    const scorers = rijen.filter(r => r.totaal > 0).length;
+    log.innerHTML += `<div>✓ ${sn} (${TYPE_LABELS[type]||type}): ${rijen.length} renners · ${scorers} scoren</div>`;
     log.scrollTop = log.scrollHeight;
-    results.push({ sn, rijen: parsed.rijen });
+    results.push({ sn, rijen });
     await new Promise(r => setTimeout(r, 20));
   }
 
@@ -574,44 +717,31 @@ window.processSheets = async function() {
   document.getElementById('prog-pct').textContent  = '100%';
   document.getElementById('prog-lbl').textContent  = 'Klaar!';
 
-  // Herlaad uitslagen metadata + rijen na import
+  // Herlaad cache
   const { data: uitslagenMeta } = await sb.from('uitslagen').select('id, koers_id, sheet_naam, type');
   getState().uitslagen = uitslagenMeta || [];
-
   const { data: rijen } = await sb.from('uitslag_rijen').select('*, uitslagen(type, koers_id)');
   getState().allUitslag_rijen = (rijen || []).map(r => {
     const u = (getState().uitslagen || []).find(x => x.id === r.uitslag_id);
-    return {
-      ...r,
-      type:       u?.type      || r.uitslagen?.type || 'rit',
-      koers_id:   u?.koers_id  || r.uitslagen?.koers_id,
-      sheet_naam: u?.sheet_naam || '',
-    };
+    return { ...r, type: u?.type || 'rit', koers_id: u?.koers_id, sheet_naam: u?.sheet_naam || '' };
   });
 
+  // Toon resultaat
   const top = results.map(({ sn, rijen }) => {
     const top3 = rijen.filter(r => r.totaal > 0).sort((a, b) => b.totaal - a.totaal).slice(0, 3);
     return `<div class="rit-hdr" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='block'?'none':'block'">
       <span class="badge bg">${koersNaam}</span>
+      <span class="badge bb">${TYPE_LABELS[type]||type}</span>
       <span style="font-size:12px;font-weight:500">${sn}</span>
-      <span class="badge" style="margin-left:auto">${rijen.filter(r => r.totaal > 0).length} scorers</span>
+      <span class="badge" style="margin-left:auto">${rijen.filter(r=>r.totaal>0).length} scorers</span>
       <span style="font-size:11px;color:var(--text2);margin-left:4px">▾</span>
     </div>
     <div class="rit-body">
-      <table><thead><tr>
-        <th>#</th><th>Renner</th><th>Pos</th>
-        <th>Rit</th><th>GC</th><th>Punten</th><th>Berg</th><th>Jeugd</th><th>Bonus</th><th>Totaal</th>
-      </tr></thead>
+      <table><thead><tr><th>#</th><th>Renner</th><th>Pos</th><th>Punten</th></tr></thead>
       <tbody>${top3.map((r, i) => `<tr>
-        <td class="${['rg','rs','rb'][i] || ''}">${i + 1}</td>
-        <td style="font-weight:500">${r.naam}</td><td>${r.rnk}</td>
-        <td>${r.pts_rit    > 0 ? `<span class="pts-pill pts-pos">+${r.pts_rit}</span>`    : '-'}</td>
-        <td>${r.pts_gc     > 0 ? `<span class="pts-pill pts-pos">+${r.pts_gc}</span>`     : '-'}</td>
-        <td>${r.pts_points > 0 ? `<span class="pts-pill pts-pos">+${r.pts_points}</span>` : '-'}</td>
-        <td>${r.pts_berg   > 0 ? `<span class="pts-pill pts-pos">+${r.pts_berg}</span>`   : '-'}</td>
-        <td>${r.pts_jeugd  > 0 ? `<span class="pts-pill pts-pos">+${r.pts_jeugd}</span>`  : '-'}</td>
-        <td>${r.pts_bonus  > 0 ? `<span class="pts-pill by">+${r.pts_bonus}</span>`       : '-'}</td>
-        <td><strong><span class="pts-pill pts-pos">+${r.totaal}</span></strong></td>
+        <td class="${['rg','rs','rb'][i]||''}">${i+1}</td>
+        <td>${r.renner_naam}</td><td>${r.rnk}</td>
+        <td><span class="pts-pill pts-pos">+${r.totaal}</span></td>
       </tr>`).join('')}</tbody></table>
     </div>`;
   }).join('');
@@ -624,7 +754,6 @@ window.processSheets = async function() {
 
 window.deleteUitslag = async function(id) {
   await sb.from('uitslagen').delete().eq('id', id);
-  // Verwijder ook uit in-memory cache zodat punten meteen verdwijnen
   getState().allUitslag_rijen = getState().allUitslag_rijen.filter(r => r.uitslag_id !== id);
   getState().uitslagen = (getState().uitslagen || []).filter(u => u.id !== id);
   renderUitslagenTab();
@@ -639,7 +768,7 @@ window.deleteAllUitslagen = async function() {
 };
 
 // ============================================================
-// CSV RENNERS TAB — enkel naam/ploeg/kostprijs
+// CSV RENNERS TAB
 // ============================================================
 function renderCsvTab() {
   document.getElementById('admin-content').innerHTML = `
@@ -656,7 +785,7 @@ function renderCsvTab() {
         </span>
       </div>
       <textarea class="csv-a" id="csv-in"
-        placeholder="Tadej Pogacar;UAE Team Emirates;95&#10;Jonas Vingegaard;Team Visma | Lease a Bike;92&#10;Remco Evenepoel;Soudal Quick-Step;90"></textarea>
+        placeholder="Tadej Pogacar;UAE Team Emirates;95&#10;Jonas Vingegaard;Team Visma | Lease a Bike;92"></textarea>
       <div style="display:flex;gap:7px;margin-bottom:8px">
         <button class="btn btn-primary" onclick="importCsvRenners()">Importeer</button>
         <label class="btn" style="cursor:pointer">
@@ -681,34 +810,24 @@ window.importCsvRenners = async function() {
   loading(true);
   const lines = raw.split('\n').map(l => l.trim()).filter(l => l);
   let added = 0, updated = 0, errors = [];
-
-  // Splits in nieuwen en te updaten
   const toInsert = [];
+
   for (const line of lines) {
     const p = line.split(';');
     if (p.length < 2) { errors.push(`Ongeldig formaat: ${line}`); continue; }
     const naam = p[0].trim();
     if (!naam) { errors.push(`Lege naam: ${line}`); continue; }
-
-    // Flexibel formaat: naam;ploeg;kostprijs  OF  naam;kostprijs  OF  naam;;kostprijs
     let ploeg, kostprijs;
     if (p.length >= 3 && isNaN(parseInt(p[1].trim()))) {
-      // naam;ploeg;kostprijs
-      ploeg     = p[1].trim();
-      kostprijs = parseInt(p[2].trim());
+      ploeg = p[1].trim(); kostprijs = parseInt(p[2].trim());
     } else if (p.length >= 2 && !isNaN(parseInt(p[1].trim()))) {
-      // naam;kostprijs (geen ploeg)
-      ploeg     = '';
-      kostprijs = parseInt(p[1].trim());
+      ploeg = ''; kostprijs = parseInt(p[1].trim());
     } else {
-      // naam;;kostprijs (lege ploeg)
-      ploeg     = p[1].trim();
-      kostprijs = parseInt(p[2].trim());
+      ploeg = p[1].trim(); kostprijs = parseInt(p[2].trim());
     }
     if (isNaN(kostprijs)) { errors.push(`Ongeldige kostprijs: ${line}`); continue; }
     const existing = getState().renners.find(r => r.naam.toLowerCase().trim() === naam.toLowerCase().trim());
     if (existing) {
-      // Update één voor één (updates gaan snel, zijn geen grote batches)
       const { error } = await sb.from('renners').update({ ploeg, kostprijs }).eq('id', existing.id);
       if (!error) { existing.ploeg = ploeg; existing.kostprijs = kostprijs; updated++; }
       else errors.push(`Update mislukt voor ${naam}: ${error.message}`);
@@ -717,7 +836,6 @@ window.importCsvRenners = async function() {
     }
   }
 
-  // Nieuwe renners in batches van 500 invoegen
   const BATCH = 500;
   for (let i = 0; i < toInsert.length; i += BATCH) {
     const batch = toInsert.slice(i, i + BATCH);
@@ -725,7 +843,7 @@ window.importCsvRenners = async function() {
     if (!error && inserted) {
       inserted.forEach(nr => { getState().renners.push({ ...nr, koers_ids: [] }); added++; });
     } else if (error) {
-      errors.push(`Batch insert mislukt (rij ${i}–${i + batch.length}): ${error.message}`);
+      errors.push(`Batch insert mislukt: ${error.message}`);
     }
   }
 
