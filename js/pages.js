@@ -309,13 +309,22 @@ export async function renderKlassement() {
     }).filter(r => r.pts_totaal > 0).sort((a, b) => b.pts_totaal - a.pts_totaal);
     return { naam: t.profiles?.naam || '—', ploeg_naam: t.ploeg_naam, pts, compleet, rennerDetail, n: rennerNamen.length, uid: t.id };
   }).sort((a, b) => b.pts - a.pts || a.naam.localeCompare(b.naam));
+
+  // Splits: complete ploegen in hoofdklassement, incomplete (>0 renners) apart onderaan
+  const rowsCompleet   = rows.filter(r => r.compleet);
+  const rowsIncompleet = rows.filter(r => !r.compleet && r.n > 0);
+  // ploegen met 0 renners worden volledig weggelaten
+
   const koersOpts = state.koersen.map(k => `<option value="${k.id}"${k.id === koersFilter ? ' selected' : ''}>${k.naam}</option>`).join('');
   const ritOpts = uitslagenVoorKoers.slice().sort((a, b) => (a.sheet_naam || '').localeCompare(b.sheet_naam || '', undefined, { numeric: true })).map(u => `<option value="${u.id}"${u.id === ritFilter ? ' selected' : ''}>${u.sheet_naam || u.id.slice(0,8)}</option>`).join('');
-  const tabelRijen = rows.map((r, i) => {
+  // Herbruikbare functie voor tabelrijen
+  const maakRij = (r, i) => {
     const detailId = `kl-detail-${r.uid}`;
     const detailHtml = r.rennerDetail.length === 0 ? '<div style="font-size:12px;color:var(--text2);padding:.5rem">Geen gescoorde punten.</div>' : `<table style="margin-top:.4rem"><thead><tr><th>Renner</th><th>Rit</th><th>Berg</th><th>GC</th><th>Punten</th><th>Jeugd</th><th>Bonus</th><th>Totaal</th></tr></thead><tbody>${r.rennerDetail.map(rd => { const rows = rd.breakdown.map(b => `<tr><td style="color:var(--text2);font-size:11px">${b.sheet || '?'}</td><td>${b.pts_rit > 0 ? `<span class="pts-pill pts-pos">+${b.pts_rit}</span>` : '-'}</td><td>${b.pts_berg > 0 ? `<span class="pts-pill pts-pos">+${b.pts_berg}</span>` : '-'}</td><td>${b.pts_gc > 0 ? `<span class="pts-pill pts-pos">+${b.pts_gc}</span>` : '-'}</td><td>${b.pts_points > 0 ? `<span class="pts-pill pts-pos">+${b.pts_points}</span>` : '-'}</td><td>${b.pts_jeugd > 0 ? `<span class="pts-pill pts-pos">+${b.pts_jeugd}</span>` : '-'}</td><td>${b.pts_bonus > 0 ? `<span class="pts-pill by">+${b.pts_bonus}</span>` : '-'}</td><td><strong><span class="pts-pill pts-pos">+${b.totaal}</span></strong></td></tr>`).join(''); return `<tr style="background:var(--bg3)"><td colspan="8" style="padding:4px 8px 2px 8px"><strong style="font-size:12px">${rd.naam}</strong><span class="pts-pill pts-pos" style="margin-left:6px">+${rd.pts_totaal} totaal</span></td></tr>${rows}`; }).join('')}</tbody></table>`;
-    return `<tr><td class="${i===0?'rg':i===1?'rs':i===2?'rb':''}">${i+1}</td><td style="font-weight:500">${r.naam}</td><td style="color:var(--text2)">${r.ploeg_naam||'—'}</td><td>${r.n}/${s.max_renners}</td><td><span class="badge ${r.compleet?'bg':'br'}">${r.compleet?'✓':'✗'}</span></td><td><span class="pts-pill ${r.pts>0?'pts-pos':'pts-zero'}" style="font-size:13px;padding:2px 9px;cursor:${r.pts>0?'pointer':'default'}" onclick="${r.pts>0?`toggleKlDetail('${detailId}')`:''}">${r.pts}${r.pts>0?' ▾':''}</span></td></tr><tr id="${detailId}" style="display:none"><td colspan="6" style="padding:4px 8px 10px 28px;background:var(--bg3)">${detailHtml}</td></tr>`;
-  }).join('');
+    return `<tr><td class="${i===0?'rg':i===1?'rs':i===2?'rb':''}">${i+1}</td><td style="font-weight:500">${r.naam}</td><td style="color:var(--text2)">${r.ploeg_naam||'—'}</td><td>${r.n}/${s.max_renners}</td><td><span class="badge ${r.compleet?'bg':'br'}">${r.compleet?'✓':'—'}</span></td><td><span class="pts-pill ${r.pts>0?'pts-pos':'pts-zero'}" style="font-size:13px;padding:2px 9px;cursor:${r.pts>0?'pointer':'default'}" onclick="${r.pts>0?`toggleKlDetail('${detailId}')`:''}">${r.pts}${r.pts>0?' ▾':''}</span></td></tr><tr id="${detailId}" style="display:none"><td colspan="6" style="padding:4px 8px 10px 28px;background:var(--bg3)">${detailHtml}</td></tr>`;
+  };
+  const tabelRijen           = rowsCompleet.map(maakRij).join('');
+  const tabelRijenIncompleet = rowsIncompleet.map((r, i) => maakRij(r, i)).join('');
   document.getElementById('page-klassement').innerHTML = `
     <div class="card">
       <div class="sh">
@@ -326,7 +335,21 @@ export async function renderKlassement() {
           <select id="kl-rit" style="width:130px;margin-bottom:0" onchange="renderKlassement()" ${!koersFilter?'disabled':''}><option value="">Alle ritten</option>${ritOpts}</select>
         </div>
       </div>
-      ${rows.length===0 ? '<div style="font-size:13px;color:var(--text2);padding:.5rem">Geen deelnemers.</div>' : `<table><thead><tr><th>#</th><th>Deelnemer</th><th>Ploegnaam</th><th>Renners</th><th>Status</th><th>Punten</th></tr></thead><tbody>${tabelRijen}</tbody></table>`}
+      ${rowsCompleet.length === 0 && rowsIncompleet.length === 0
+        ? '<div style="font-size:13px;color:var(--text2);padding:.5rem">Geen deelnemers.</div>'
+        : `<table><thead><tr><th>#</th><th>Deelnemer</th><th>Ploegnaam</th><th>Renners</th><th>Status</th><th>Punten</th></tr></thead>
+           <tbody>${tabelRijen}</tbody></table>
+           ${rowsIncompleet.length > 0 ? `
+             <div style="margin-top:1rem;padding-top:.8rem;border-top:1px solid var(--border)">
+               <div style="font-size:12px;font-weight:500;color:var(--text2);margin-bottom:.5rem">
+                 Incomplete ploegen (${rowsIncompleet.length})
+               </div>
+               <table style="opacity:.65">
+                 <thead><tr><th>#</th><th>Deelnemer</th><th>Ploegnaam</th><th>Renners</th><th>Status</th><th>Punten</th></tr></thead>
+                 <tbody>${tabelRijenIncompleet}</tbody>
+               </table>
+             </div>` : ''}
+          `}
     </div>`;
 }
 
